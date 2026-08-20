@@ -22,6 +22,12 @@ export default function JobComposer({
     skills: "",
     applyMethod: "EASY" as "EASY" | "EXTERNAL",
     applyUrl: "",
+    /** TRUST-001 — the ghost-jobs attestation. Required by the API. */
+    attest: false,
+    /** LEGAL-002 — headcount drives the pay-transparency thresholds. */
+    employeeCount: "",
+    /** WORK-002 — three states. "" means unstated, and is never inferred. */
+    sponsorship: "" as "" | "YES" | "NO",
   });
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -29,6 +35,12 @@ export default function JobComposer({
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    // Catch it here rather than letting the server reject it, so the message
+    // lands next to the control the recruiter has to act on.
+    if (!f.attest) {
+      setErr("Please confirm this is a current, open vacancy that you're authorized to advertise.");
+      return;
+    }
     setBusy(true);
     setErr(null);
     const res = await fetch("/api/jobs", {
@@ -46,6 +58,9 @@ export default function JobComposer({
         skills: f.skills.split(",").map((s) => s.trim()).filter(Boolean),
         applyMethod: f.applyMethod,
         applyUrl: f.applyMethod === "EXTERNAL" ? f.applyUrl : null,
+        attestCurrentVacancy: f.attest,
+        employeeCount: f.employeeCount ? Number(f.employeeCount) : null,
+        sponsorshipAvailable: f.sponsorship === "" ? null : f.sponsorship === "YES",
       }),
     });
     const data = await res.json();
@@ -145,6 +160,69 @@ export default function JobComposer({
             />
           </label>
         ) : null}
+
+        <div className="two">
+          <label className="field">
+            <span>Company headcount — optional</span>
+            <input
+              type="number"
+              min={1}
+              value={f.employeeCount}
+              onChange={(e) => set("employeeCount", e.target.value)}
+              placeholder="250"
+            />
+            <small style={{ color: "var(--dim)", fontSize: 12 }}>
+              Sets which pay-transparency rules apply. Left blank, we assume they all do.
+            </small>
+          </label>
+          <label className="field">
+            <span>Visa sponsorship</span>
+            <select
+              value={f.sponsorship}
+              onChange={(e) => set("sponsorship", e.target.value as "" | "YES" | "NO")}
+            >
+              <option value="">Prefer not to state</option>
+              <option value="YES">Available for this role</option>
+              <option value="NO">Not available for this role</option>
+            </select>
+          </label>
+        </div>
+
+        {/* ── TRUST-001: the ghost-jobs attestation. Required, not optional. ── */}
+        <label
+          htmlFor="attest-vacancy"
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 10,
+            margin: "4px 0 14px",
+            padding: "12px 14px",
+            border: "1px solid var(--line, #e6e8f0)",
+            borderRadius: 12,
+            cursor: "pointer",
+            color: "var(--fg, #12141c)",
+            fontSize: 13.5,
+            lineHeight: 1.5,
+          }}
+        >
+          <input
+            id="attest-vacancy"
+            type="checkbox"
+            checked={f.attest}
+            onChange={(e) => set("attest", e.target.checked)}
+            required
+            aria-describedby="attest-vacancy-text"
+            style={{ marginTop: 2, width: 18, height: 18, flexShrink: 0 }}
+          />
+          <span id="attest-vacancy-text">
+            I confirm this is a <b>current, open vacancy</b> that I am authorized to advertise.
+            <br />
+            <small style={{ color: "var(--dim)" }}>
+              Advertising a role that isn&rsquo;t genuinely open is unlawful in several states —
+              Texas allows treble damages.
+            </small>
+          </span>
+        </label>
 
         {err ? <div className="err">{err}</div> : null}
 
