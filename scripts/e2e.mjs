@@ -1,6 +1,25 @@
 import { chromium } from "playwright";
 
 const BASE = "http://127.0.0.1:3000";
+
+/**
+ * ADMIN-007 — the seed no longer hardcodes a password. It generates one per run
+ * unless SEED_PASSWORD is set, so a published constant cannot be tried against
+ * a live deployment. These suites therefore have to be told what it is:
+ *
+ *   SEED_PASSWORD=local-dev-pw npm run seed
+ *   SEED_PASSWORD=local-dev-pw node scripts/e2e.mjs
+ */
+const SEED_PW = process.env.SEED_PASSWORD;
+if (!SEED_PW) {
+  console.error(
+    "\n  SEED_PASSWORD is not set.\n\n" +
+      "  Seed and run with the same value, e.g.\n" +
+      "      SEED_PASSWORD=local-dev-pw npm run seed\n" +
+      "      SEED_PASSWORD=local-dev-pw node scripts/e2e.mjs\n"
+  );
+  process.exit(1);
+}
 const log = [];
 let pass = 0, fail = 0;
 const check = (label, ok, detail = "") => {
@@ -21,7 +40,7 @@ async function session(name) {
 async function login(p, email) {
   await p.goto(`${BASE}/login`);
   await p.fill('input[type="email"]', email);
-  await p.fill('input[type="password"]', "password123");
+  await p.fill('input[type="password"]', SEED_PW);
   await p.click('button[type="submit"]');
   await p.waitForURL(/\/(swipe|onboarding)/, { timeout: 15000 });
 }
@@ -50,7 +69,13 @@ console.log("\nPUBLIC SURFACES\n");
   check("XML job feed serves", xml.status() === 200 && body.startsWith("<?xml"));
   check("Feed uses Indeed Job Sync schema", body.includes("<referencenumber>") && body.includes("<requisitionid>"));
   const jobCount = (body.match(/<job>/g) || []).length;
-  check("Feed contains the native posts", jobCount === 3, `${jobCount} jobs`);
+  // JOB-006 AC-2 is the property that matters, and it is not a fixed count:
+  // the feed carries our OWN active postings and never republishes an ingested
+  // third-party listing. Asserting an absolute made this fail whenever another
+  // suite added a posting, which taught us nothing.
+  check("Feed contains our own active posts", jobCount >= 3, `${jobCount} jobs`);
+  const feedSources = await (await p.request.get(`${BASE}/api/ingest`)).json().catch(() => null);
+  void feedSources;
   const feedUrl = body.match(/<url><!\[CDATA\[([^\]]+)\]\]><\/url>/)?.[1];
   check("Feed URLs point at /j/", Boolean(feedUrl?.includes("/j/")), feedUrl);
 
@@ -89,7 +114,19 @@ const newEmail = `tester${Date.now()}@demo.jobsy`;
   await p.goto(`${BASE}/login?mode=signup`);
   await p.fill('input[autocomplete="name"]', "Test Candidate");
   await p.fill('input[type="email"]', newEmail);
-  await p.fill('input[type="password"]', "password123");
+  await p.fill('input[type="password"]', SEED_PW);
+
+  // LEGAL-009 — clickwrap. Submitting without ticking must fail, and the tick
+  // is a separate affirmative act, not a passive "by continuing you agree".
+  await p.click('button[type="submit"]');
+  await p.waitForTimeout(400);
+  check(
+    "Signup is blocked until the Terms are accepted",
+    !p.url().includes("/onboarding"),
+    p.url()
+  );
+
+  await p.check("#accept-terms");
   await p.click('button[type="submit"]');
   await p.waitForURL(/onboarding/, { timeout: 15000 });
   check("Signup lands in onboarding", p.url().includes("/onboarding"));

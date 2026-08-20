@@ -8,7 +8,9 @@ const pool =
   globalForDb.pool ??
   new Pool({
     connectionString: process.env.DATABASE_URL,
-    // Neon and most hosted Postgres require TLS; local docker does not.
+    // Hosted Postgres requires TLS; local docker does not. Certificates are
+    // fully verified — never disable that, or the connection is open to a
+    // man-in-the-middle who could read every row in transit.
     ssl: /neon\.tech|amazonaws|render\.com|supabase/.test(process.env.DATABASE_URL ?? "")
       ? true
       : undefined,

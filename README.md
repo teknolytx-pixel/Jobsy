@@ -186,6 +186,60 @@ Every card shows the score, which skills matched, which are missing, and a plain
 
 ---
 
+## The match engine
+
+`src/lib/matching/` — three files: `taxonomy.ts` (skill relatedness + role families), `requirements.ts` (parses a JD into must-have vs nice-to-have), `engine.ts` (the scorer).
+
+### How a score is built
+
+| Feature | Weight | Notes |
+|---|---|---|
+| Required skills | 40 | Weighted by position in the posting; partial credit for adjacent skills |
+| Preferred skills | 12 | The "nice to have" block. If a posting has none, this weight moves to required rather than being given away |
+| Experience | 18 | Against the years the posting actually names, not a guess from the title |
+| Compensation | 16 | Does the band clear the candidate's target |
+| Work style | 14 | Remote/hybrid/onsite feasibility |
+
+Two multipliers sit on top:
+
+- **Role family** gates the skill score. A Product Designer and a Backend Engineer share tokens like "Design Systems" by coincidence, so cross-family compatibility (0.25 for distant families) multiplies skills rather than subtracting points.
+- **Qualification gates logistics.** Experience + comp + work style are 48 points between them. Ungated, anyone in the right city with a plausible salary target floored near 50% — a designer scored **53%** on a backend role on logistics alone. Those three are now scaled by `0.25 + 0.75 × qualification`, so they only count once someone can actually do the job. That designer now scores **16%**.
+
+Multiplying the components rather than capping the total keeps `score === sum(breakdown)` exactly, which is what makes a score explainable to a candidate and auditable by an assessor.
+
+### What it fixed
+
+| Case | Before | After |
+|---|---|---|
+| Product Designer on a Backend role | 53% | **16%** |
+| Vue developer on a React role | 0 skill credit | **75%**, vs 12% for an unrelated candidate |
+| Nice-to-haves scored like must-haves | equal | **80% vs 32%** |
+| Remote-only candidate, onsite job | ranked normally | **excluded**, with the reason shown |
+
+Every score also returns `concerns` (why it might not work), `transferableSkills` (which of your skills earned credit for what), `qualification`, and a `breakdown` — so a low score never looks arbitrary.
+
+### Compliance — why it isn't an LLM
+
+Jobsy ranks candidates for employers, making it an **Automated Employment Decision Tool**:
+
+| Law | Status | Requires |
+|---|---|---|
+| NYC Local Law 144 | In force | Annual independent bias audit, published 6+ months; 10 business days' notice; opt-out |
+| Colorado SB 24-205 | In force since June 2026 | Annual impact assessments, NIST AI RMF alignment, notice before adverse decisions |
+| Illinois HB 3773 | In force Jan 2026 | AI employment discrimination liability |
+
+So the engine is deterministic and decomposable by design. **Features never used:** name, photo, school, graduation year, exact address, age, gender, or any proxy for them. Location is used only as commute feasibility, never as a neighbourhood signal. An unclassifiable job title scores neutral (0.8), never punitive — silently burying anyone with an unusual title is exactly what an audit would flag.
+
+**Not yet done, and required before you rely on this commercially:** the bias audit itself, the candidate notice, and the opt-out flow. None of that is built.
+
+### Designed-for extensions
+
+- **L2 semantic** — embed JD and profile, cosine as one more feature. Neon supports pgvector; needs a migration and an embedding key. Catches what the keyword taxonomy misses.
+- **L3 learned weights** — every swipe is a labelled example. Learn per-recruiter weights and global weights that predict *mutual* matches, not just likes. The data is already being collected in `candidate_swipes` and `recruiter_swipes` and is currently unused.
+- **L4 LLM rerank** on the top ~20 only, with written rationale. Never on the full corpus.
+
+---
+
 ## How a match happens
 
 ```
@@ -219,7 +273,11 @@ src/
   db/schema.ts            Drizzle schema — users, jobs, swipes, matches, messages, email log
   lib/
     auth.ts               JWT cookie sessions + the full LinkedIn OIDC flow
-    match.ts              bidirectional fit scoring
+    matching/
+      taxonomy.ts         skill adjacency graph + role families
+      requirements.ts     must-have vs nice-to-have extraction from a JD
+      engine.ts           the scorer — explainable, deterministic, auditable
+    match.ts              compatibility shim over matching/engine
     skills.ts             skill taxonomy, normalisation, extraction from prose
     swipe.ts              swipe outcomes: applications, emails, match creation
     deck.ts               deck building + re-ranking
@@ -256,7 +314,8 @@ scripts/
 ## Tests
 
 ```bash
-npm run test:providers   # 31 — aggregator parsers, salary maths, match engine
+npm run test:matching    # 43 — scoring, requirement parsing, taxonomy, explainability
+npm run test:providers   # 31 — aggregator parsers, salary maths
 npm run test:sources     # 44 — 9 ATS connectors, 4 detection strategies, fallbacks
 npm run test:e2e         # 46 — browser: registration, swiping, matching, chat
 node scripts/e2e-sources.mjs  # 20 — browser: connect a company end to end
@@ -264,7 +323,7 @@ node scripts/e2e-sources.mjs  # 20 — browser: connect a company end to end
 
 The unit suites run every adapter against recorded payloads in the exact shape each live API returns, with `fetch` stubbed. The browser suites drive a real Chromium against a running server — the sources one stands up a fake careers site publishing real JSON-LD, connects it, and verifies the pulled jobs become swipeable cards.
 
-All four are currently green: **31 + 44 + 46 + 20 = 141/141**.
+All five are currently green: **43 + 31 + 44 + 46 + 20 = 184/184**.
 
 ---
 

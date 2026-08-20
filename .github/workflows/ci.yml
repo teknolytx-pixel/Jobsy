@@ -1,0 +1,85 @@
+# PLAT-006 — the pipeline that has to be green before anything merges.
+#
+# The MATCH-030 guard runs FIRST and on its own. It is the check that enforces
+# what the AEDT notice promises candidates in writing: that the matching engine
+# cannot see a protected attribute. If that fails, nothing else matters.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: jobsy_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/jobsy_test
+      AUTH_SECRET: ci-only-secret-value-at-least-32-bytes-long
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      CRON_SECRET: ci-cron-secret
+      COMPANY_POSTAL_ADDRESS: "CI, 1 Test Street, Test City, ST 00000"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # ── the guard that protects the promise, first and alone ──
+      - name: MATCH-030 prohibited-input guard
+        run: npm run guard
+
+      - name: Secret scan
+        run: |
+          # A committed secret is not something to discover in production.
+          if git grep -nIE '(AUTH_SECRET|CRON_SECRET|RESEND_API_KEY|DATABASE_URL)[[:space:]]*=[[:space:]]*["'\''][^"'\''$]{12,}' -- ':!*.example' ':!.github/*' ; then
+            echo "::error::A literal secret appears to be committed."
+            exit 1
+          fi
+          if git ls-files | grep -qE '^\.env$'; then
+            echo "::error::.env must never be committed."
+            exit 1
+          fi
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Migrate
+        run: npx drizzle-kit migrate
+
+      - name: Unit and compliance suites
+        run: |
+          npm run test:matching
+          npm run test:providers
+          npm run test:sources
+          npm run test:compliance
+          npm run test:security
+
+      - name: Build
+        run: npm run build
+
+      - name: End-to-end lifecycle
+        run: |
+          npm run seed
+          npm start &
+          npx wait-on http://localhost:3000/login -t 60000
+          npm run test:lifecycle

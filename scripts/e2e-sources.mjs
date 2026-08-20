@@ -7,6 +7,25 @@ import { chromium } from "playwright";
 import { createServer } from "node:http";
 
 const BASE = "http://127.0.0.1:3000";
+
+/**
+ * ADMIN-007 — the seed no longer hardcodes a password. It generates one per run
+ * unless SEED_PASSWORD is set, so a published constant cannot be tried against
+ * a live deployment. These suites therefore have to be told what it is:
+ *
+ *   SEED_PASSWORD=local-dev-pw npm run seed
+ *   SEED_PASSWORD=local-dev-pw node scripts/e2e.mjs
+ */
+const SEED_PW = process.env.SEED_PASSWORD;
+if (!SEED_PW) {
+  console.error(
+    "\n  SEED_PASSWORD is not set.\n\n" +
+      "  Seed and run with the same value, e.g.\n" +
+      "      SEED_PASSWORD=local-dev-pw npm run seed\n" +
+      "      SEED_PASSWORD=local-dev-pw node scripts/e2e.mjs\n"
+  );
+  process.exit(1);
+}
 let pass = 0, fail = 0;
 const check = (l, ok, d = "") => { console.log(`  ${ok ? "✓" : "✗"} ${l}${d ? ` — ${d}` : ""}`); ok ? pass++ : fail++; };
 
@@ -44,7 +63,7 @@ p.on("pageerror", (e) => errs.push(`PAGEERROR ${e.message}`));
 // sign in as the recruiter
 await p.goto(`${BASE}/login`);
 await p.fill('input[type="email"]', "recruiter@demo.jobsy");
-await p.fill('input[type="password"]', "password123");
+await p.fill('input[type="password"]', SEED_PW);
 await p.click('button[type="submit"]');
 await p.waitForURL(/\/(swipe|onboarding)/, { timeout: 15000 });
 
@@ -96,7 +115,7 @@ const logout = async () => {
 await logout();
 await p.goto(`${BASE}/login`);
 await p.fill('input[type="email"]', "candidate@demo.jobsy");
-await p.fill('input[type="password"]', "password123");
+await p.fill('input[type="password"]', SEED_PW);
 await p.click('button[type="submit"]');
 await p.waitForURL(/\/swipe/, { timeout: 15000 });
 
@@ -119,7 +138,7 @@ console.log("\nPAUSE / DISCONNECT\n");
 await logout();
 await p.goto(`${BASE}/login`);
 await p.fill('input[type="email"]', "recruiter@demo.jobsy");
-await p.fill('input[type="password"]', "password123");
+await p.fill('input[type="password"]', SEED_PW);
 await p.click('button[type="submit"]');
 await p.waitForURL(/\/(swipe|onboarding)/, { timeout: 15000 });
 await p.goto(`${BASE}/sources`);

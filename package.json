@@ -15,10 +15,18 @@
     "setup": "npm run db:push && npm run seed && npm run ingest",
     "reset": "tsx scripts/reset-demo.ts",
     "test:providers": "tsx scripts/test-providers.mts",
-    "test:e2e": "npm run reset && npm run seed && node scripts/e2e.mjs",
+    "test:e2e": "SEED_PASSWORD=local-e2e-password npm run reset && SEED_PASSWORD=local-e2e-password npm run seed && SEED_PASSWORD=local-e2e-password node scripts/e2e.mjs",
     "test:sources": "tsx scripts/test-sources.mts",
-    "test": "npm run test:providers && npm run test:sources",
-    "db:migrate": "drizzle-kit migrate"
+    "test": "npm run guard && npm run test:matching && npm run test:providers && npm run test:sources && npm run test:compliance && npm run test:security",
+    "db:migrate": "drizzle-kit migrate",
+    "test:matching": "tsx scripts/test-matching.mts",
+    "guard": "tsx scripts/check-prohibited-inputs.mts",
+    "test:compliance": "tsx scripts/test-compliance.mts",
+    "test:security": "tsx scripts/test-security.mts",
+    "test:lifecycle": "tsx scripts/e2e-lifecycle.mjs",
+    "verify": "npm run typecheck && npm run guard && npm run test && npm run build",
+    "test:e2e:sources": "SEED_PASSWORD=local-e2e-password node scripts/e2e-sources.mjs",
+    "maintenance": "tsx scripts/maintenance.mts"
   },
   "dependencies": {
     "bcryptjs": "3.0.3",

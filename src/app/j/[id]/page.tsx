@@ -5,6 +5,7 @@ import { companies, db, jobs } from "@/db";
 import { env } from "@/lib/env";
 import { Avatar } from "@/components/ui";
 import { money, REMOTE_LABEL } from "@/components/format";
+import { safeJsonLd, stripHtml } from "@/lib/safeJson";
 
 export const dynamic = "force-dynamic";
 
@@ -53,7 +54,8 @@ export default async function PublicJobPage({ params }: { params: Promise<{ id: 
     "@context": "https://schema.org/",
     "@type": "JobPosting",
     title: job.title,
-    description: job.description,
+    // Plain text: JSON-LD is not a place to relay an employer's markup.
+    description: stripHtml(job.description),
     identifier: { "@type": "PropertyValue", name: company.name, value: job.id },
     datePosted: job.postedAt.toISOString(),
     employmentType: job.employmentType.toUpperCase().replace("-", "_"),
@@ -98,7 +100,7 @@ export default async function PublicJobPage({ params }: { params: Promise<{ id: 
     <div className="shell">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{ __html: safeJsonLd(jsonLd) }}
       />
 
       <header className="top">

@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { SignJWT, jwtVerify } from "jose";
 import bcrypt from "bcryptjs";
-import { eq, or } from "drizzle-orm";
+import { eq, or, sql } from "drizzle-orm";
 import { db, users, type User } from "@/db";
 import { env } from "./env";
 
@@ -10,10 +10,22 @@ const MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
 const secret = () => new TextEncoder().encode(env.authSecret);
 
-export type SessionPayload = { uid: string; email: string };
+export type SessionPayload = { uid: string; email: string; sv: number };
 
-export async function createSession(userId: string, email: string): Promise<string> {
-  return new SignJWT({ uid: userId, email })
+/**
+ * AUTH-008 — the `sv` claim is the user's session_version at issue time.
+ *
+ * Verification rejects any token whose claim is below the row's current value,
+ * so incrementing the column revokes every outstanding session on the very next
+ * request. No deploy, no cache flush, no session table to sweep. Password reset,
+ * password change and admin suspension all increment it.
+ */
+export async function createSession(
+  userId: string,
+  email: string,
+  sessionVersion = 0
+): Promise<string> {
+  return new SignJWT({ uid: userId, email, sv: sessionVersion })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${MAX_AGE}s`)
@@ -41,9 +53,18 @@ export async function readSession(): Promise<SessionPayload | null> {
   const token = jar.get(COOKIE)?.value;
   if (!token) return null;
   try {
-    const { payload } = await jwtVerify(token, secret());
+    // Pinning the algorithm is what stops an `alg: none` or algorithm-confusion
+    // token from being accepted. jose defaults are sane, but this is explicit.
+    const { payload } = await jwtVerify(token, secret(), { algorithms: ["HS256"] });
     if (typeof payload.uid !== "string" || typeof payload.email !== "string") return null;
-    return { uid: payload.uid, email: payload.email };
+    return {
+      uid: payload.uid,
+      email: payload.email,
+      // Tokens issued before AUTH-008 have no `sv`; treat them as version 0,
+      // which is the default on every existing row, so they keep working until
+      // the first revocation.
+      sv: typeof payload.sv === "number" ? payload.sv : 0,
+    };
   } catch {
     return null;
   }
@@ -53,17 +74,85 @@ export async function currentUser(): Promise<User | null> {
   const s = await readSession();
   if (!s) return null;
   const rows = await db.select().from(users).where(eq(users.id, s.uid)).limit(1);
-  return rows[0] ?? null;
+  const user = rows[0];
+  if (!user) return null;
+
+  // AUTH-008 — a stale session version means the session was revoked.
+  if (s.sv < user.sessionVersion) return null;
+
+  // A suspended, closed or deleted account has no session, whatever the cookie
+  // says. `deletionRequestedAt` matters as much as `deletedAt`: closure is
+  // effective immediately from the user's point of view, and the purge that
+  // sets `deletedAt` does not run for 30 days.
+  if (user.suspendedAt || user.deletedAt || user.deletionRequestedAt) return null;
+
+  return user;
 }
 
 export class AuthError extends Error {
   status = 401;
 }
 
+export class ForbiddenError extends Error {
+  status = 403;
+  code: string;
+  constructor(message: string, code = "FORBIDDEN") {
+    super(message);
+    this.code = code;
+  }
+}
+
 export async function requireUser(): Promise<User> {
   const u = await currentUser();
   if (!u) throw new AuthError("Not signed in");
   return u;
+}
+
+/**
+ * AUTH-006 AC-5/6 — gate the actions that must not be available to an
+ * unverified address: posting a job, messaging a match, and appearing in a
+ * recruiter's deck.
+ *
+ * LinkedIn OIDC accounts arrive verified, because LinkedIn asserts a verified
+ * email in the userinfo response.
+ */
+export async function requireVerifiedUser(): Promise<User> {
+  const u = await requireUser();
+  if (!u.emailVerified) {
+    throw new ForbiddenError(
+      "Please verify your email address before doing this. Check your inbox, or request a new link from your profile.",
+      "EMAIL_NOT_VERIFIED"
+    );
+  }
+  return u;
+}
+
+/** ADMIN-001 — platform staff, distinct from any company role. */
+export async function requirePlatformAdmin(): Promise<User> {
+  const u = await requireUser();
+  if (!u.isPlatformAdmin) throw new ForbiddenError("Administrator access required", "ADMIN_ONLY");
+  return u;
+}
+
+/** Increment session_version, revoking every outstanding session for a user. */
+export async function revokeSessions(userId: string): Promise<number> {
+  const [row] = await db
+    .update(users)
+    .set({ sessionVersion: sql`${users.sessionVersion} + 1`, updatedAt: new Date() })
+    .where(eq(users.id, userId))
+    .returning({ sv: users.sessionVersion });
+  return row?.sv ?? 0;
+}
+
+/** Map any auth error to a JSON response with a stable machine-readable code. */
+export function authErrorResponse(e: unknown): Response | null {
+  if (e instanceof ForbiddenError) {
+    return Response.json({ error: e.message, code: e.code }, { status: 403 });
+  }
+  if (e instanceof AuthError) {
+    return Response.json({ error: e.message, code: "UNAUTHENTICATED" }, { status: 401 });
+  }
+  return null;
 }
 
 export const hashPassword = (pw: string) => bcrypt.hash(pw, 10);

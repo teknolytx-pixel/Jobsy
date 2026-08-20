@@ -9,17 +9,54 @@
 import "dotenv/config";
 import { and, eq } from "drizzle-orm";
 import bcrypt from "bcryptjs";
+import { createHash, randomBytes } from "node:crypto";
 import {
   candidateSwipes,
   companies,
   db,
   jobs,
+  notificationPrefs,
   recruiterSwipes,
   users,
   type RemotePref,
 } from "../src/db";
 
-const PW = "password123";
+/**
+ * ADMIN-007 — the production guard.
+ *
+ * Demo accounts with a published password on a live public URL are an open
+ * door. This script refused to notice that, so it now refuses to run against
+ * anything that looks like production unless someone explicitly says otherwise.
+ *
+ * The password itself is generated per-run rather than hardcoded, so even a
+ * local seed does not create a credential that is the same on every machine.
+ */
+function assertNotProduction() {
+  const url = process.env.DATABASE_URL ?? "";
+  const looksProd =
+    process.env.NODE_ENV === "production" ||
+    process.env.VERCEL_ENV === "production" ||
+    /neon\.tech|amazonaws|render\.com|supabase|\.rds\./i.test(url);
+
+  if (looksProd && process.env.ALLOW_PROD_SEED !== "yes-i-am-sure") {
+    console.error(
+      "\n  REFUSING TO SEED\n\n" +
+        "  This DATABASE_URL looks like a hosted/production database, and seeding\n" +
+        "  would create demo accounts with a known password on a live deployment.\n\n" +
+        "  If you genuinely mean to do this, set:\n" +
+        "      ALLOW_PROD_SEED=yes-i-am-sure\n\n" +
+        "  Then delete every @demo.jobsy account before anyone else can reach it.\n"
+    );
+    process.exit(1);
+  }
+}
+assertNotProduction();
+
+/**
+ * AC-3 — a generated password, printed once. Not a constant anyone can look up
+ * in the repository and try against a live deployment.
+ */
+const PW = process.env.SEED_PASSWORD ?? `demo-${randomBytes(9).toString("base64url")}`;
 
 type C = {
   email: string; name: string; headline: string; location: string; remotePref: RemotePref;
@@ -42,11 +79,25 @@ const CANDIDATES: C[] = [
 ];
 
 async function upsertUser(v: Parameters<typeof users.$inferInsert extends never ? never : never> | typeof users.$inferInsert) {
+  // AUTH-006 — seeded accounts arrive verified. They exist to be logged into,
+  // and the verification email would go to a @demo.jobsy address nobody reads.
+  const withDefaults = { ...v, emailVerified: true };
   const [row] = await db
     .insert(users)
-    .values(v)
-    .onConflictDoUpdate({ target: users.email, set: { ...v, updatedAt: new Date() } })
+    .values(withDefaults)
+    .onConflictDoUpdate({
+      target: users.email,
+      set: { ...withDefaults, updatedAt: new Date() },
+    })
     .returning();
+
+  // NOTIF-001 — every user needs preferences and an unsubscribe token, or the
+  // unsubscribe link in their first email has nothing to look up.
+  await db
+    .insert(notificationPrefs)
+    .values({ userId: row.id, unsubscribeTokenHash: createHash("sha256").update(randomBytes(32)).digest("hex") })
+    .onConflictDoNothing();
+
   return row;
 }
 

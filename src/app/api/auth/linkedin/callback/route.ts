@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { env } from "@/lib/env";
+import { deliverAedtNotice } from "@/lib/compliance/aedt";
 import {
   createSession,
   exchangeLinkedInCode,
@@ -28,7 +29,11 @@ export async function GET(req: Request) {
   try {
     const profile = await exchangeLinkedInCode(code);
     const user = await upsertUserFromLinkedIn(profile);
-    await setSessionCookie(await createSession(user.id, user.email));
+
+    // XPLAIN-002 — the AEDT notice is delivered before any automated
+    // assessment, on this path as well as password signup. Idempotent.
+    await deliverAedtNotice(user.id, user.jurisdiction);
+    await setSessionCookie(await createSession(user.id, user.email, user.sessionVersion));
     // New LinkedIn users land in onboarding to fill the parts LinkedIn won't give us.
     return NextResponse.redirect(`${env.appUrl}${user.profileReady ? "/swipe" : "/onboarding"}`);
   } catch (e) {

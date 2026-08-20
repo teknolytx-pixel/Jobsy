@@ -4,4 +4,12 @@ node_modules/
 .env.local
 *.log
 .DS_Store
-/drizzle/meta
+# NOTE: drizzle/meta must be COMMITTED.
+#
+# _journal.json is how drizzle-kit knows which migrations have been applied. It
+# was previously ignored here, which means a fresh clone (or CI) would try to
+# re-apply migration 0000 against a database that already has it and fail. The
+# snapshots are also needed to generate the next migration correctly.
+
+# Local resume storage used when BLOB_READ_WRITE_TOKEN is unset.
+/tmp-resumes/

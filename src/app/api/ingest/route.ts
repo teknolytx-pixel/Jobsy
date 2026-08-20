@@ -3,14 +3,28 @@ import { env } from "@/lib/env";
 import { deactivateStale, ingestAll } from "@/lib/ingest";
 import { activeProviders, ALL_PROVIDERS } from "@/lib/providers";
 import { listSources, syncAllSources } from "@/lib/sources";
+import { runMaintenance } from "@/lib/maintenance";
+import { secretEquals } from "@/lib/tokens";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const authorized = (req: Request) => {
   const secret = env.cronSecret;
-  if (!secret) return true; // unset in dev → open
-  return req.headers.get("authorization") === `Bearer ${secret}`;
+  if (!secret) {
+    // Unset in dev so the app is runnable with no configuration. In production
+    // an unset CRON_SECRET means an open endpoint that can be hammered, so
+    // refuse rather than silently allow.
+    if (process.env.NODE_ENV === "production") {
+      console.error("[ingest] CRON_SECRET is not set in production — refusing.");
+      return false;
+    }
+    return true;
+  }
+  const header = req.headers.get("authorization") ?? "";
+  // ING-006 AC-5 — constant-time, so a wrong secret does not leak its correct
+  // prefix through response timing.
+  return secretEquals(header, `Bearer ${secret}`);
 };
 
 /**
@@ -60,6 +74,11 @@ async function runIngest() {
   // 2. broad — query-based discovery across the aggregators
   const runs = await ingestAll();
   const deactivated = await deactivateStale();
+  // 3. housekeeping — ghost-job expiry, data purge, rate-limit sweep. Runs
+  //    last and independently: a failure here must not lose the ingest result.
+  const maintenance = await runMaintenance().catch((e) => ({
+    errors: [`maintenance failed entirely: ${(e as Error).message}`],
+  }));
 
   const sum = (rows: { fetched: number; created: number; updated: number }[]) =>
     rows.reduce(
@@ -86,5 +105,6 @@ async function runIngest() {
       totals: sum(runs),
     },
     deactivated,
+    maintenance,
   });
 }

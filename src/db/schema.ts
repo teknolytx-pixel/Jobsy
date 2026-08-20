@@ -65,7 +65,81 @@ export const emailTemplateEnum = pgEnum("email_template", [
   "APPLICATION_RECEIVED",
   "MATCH_CANDIDATE",
   "MATCH_RECRUITER",
+  // ── PRD v1.0 additions ──
+  "VERIFY_EMAIL",
+  "PASSWORD_RESET",
+  "PASSWORD_CHANGED",
+  "COMPANY_INVITE",
+  "NEW_MESSAGE",
+  "JOB_EXPIRY_WARNING",
+  "SOURCE_DISABLED",
+  "REPORT_ACKNOWLEDGED",
+  "HUMAN_REVIEW_OUTCOME",
+  "DATA_EXPORT_READY",
+  "ACCOUNT_DELETED",
 ]);
+
+export const tokenPurposeEnum = pgEnum("token_purpose", [
+  "VERIFY_EMAIL",
+  "RESET_PASSWORD",
+  "COMPANY_INVITE",
+  "DOMAIN_VERIFY",
+  "UNSUBSCRIBE",
+]);
+
+export const seatRoleEnum = pgEnum("seat_role", ["COMPANY_ADMIN", "RECRUITER"]);
+export const memberStatusEnum = pgEnum("member_status", ["ACTIVE", "SUSPENDED"]);
+export const inviteStatusEnum = pgEnum("invite_status", [
+  "PENDING",
+  "ACCEPTED",
+  "REVOKED",
+  "EXPIRED",
+]);
+
+export const parseStatusEnum = pgEnum("parse_status", ["PENDING", "OK", "FAILED", "MANUAL"]);
+
+export const reportKindEnum = pgEnum("report_kind", ["JOB", "USER", "MESSAGE", "COMPANY"]);
+export const reportReasonEnum = pgEnum("report_reason", [
+  "SCAM_OR_FEE",
+  "DISCRIMINATORY",
+  "HARASSMENT",
+  "SPAM",
+  "GHOST_JOB",
+  "IMPERSONATION",
+  "OTHER",
+]);
+export const reportStatusEnum = pgEnum("report_status", [
+  "OPEN",
+  "REVIEWING",
+  "ACTIONED",
+  "DISMISSED",
+]);
+export const moderationActionEnum = pgEnum("moderation_action", [
+  "NONE",
+  "WARNED",
+  "CONTENT_REMOVED",
+  "SUSPENDED",
+  "BANNED",
+]);
+
+export const privacyRequestKindEnum = pgEnum("privacy_request_kind", [
+  "ACCESS",
+  "EXPORT",
+  "DELETE",
+  "CORRECT",
+  "OPT_OUT_PROFILING",
+  "LIMIT_SENSITIVE",
+  "HUMAN_REVIEW",
+]);
+export const privacyRequestStatusEnum = pgEnum("privacy_request_status", [
+  "RECEIVED",
+  "IN_PROGRESS",
+  "COMPLETED",
+  "DENIED",
+  "ON_LEGAL_HOLD",
+]);
+
+export const consentSourceEnum = pgEnum("consent_source", ["EMPLOYER_SUBMITTED", "CRAWLED"]);
 
 const id = () =>
   varchar("id", { length: 36 })
@@ -81,7 +155,19 @@ export const companies = pgTable("companies", {
   slug: varchar("slug", { length: 80 }).notNull().unique(),
   website: text("website"),
   logoUrl: text("logo_url"),
+  description: text("description"),
   source: jobSourceEnum("source").notNull().default("JOBSY"),
+
+  // ── COMP-003 domain verification ──
+  emailDomain: varchar("email_domain", { length: 191 }),
+  verified: boolean("verified").notNull().default(false),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
+  /** "EMAIL" or "DNS" — recorded so a verification can be audited later. */
+  verifiedMethod: varchar("verified_method", { length: 20 }),
+
+  /** SEAT-001. Read from the row, never hardcoded: 1 admin + 3 recruiters. */
+  seatLimit: integer("seat_limit").notNull().default(4),
+
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -118,6 +204,33 @@ export const users = pgTable(
     // recruiter side
     companyId: varchar("company_id", { length: 36 }).references(() => companies.id),
     title: text("title"),
+
+    // ── work authorization (WORK-001) ──
+    // Exactly two booleans. Never a visa category, country of citizenship,
+    // status detail or document number — see PRD WORK-001 and IRCA 8 USC 1324b.
+    authorizedToWork: boolean("authorized_to_work"),
+    requiresSponsorship: boolean("requires_sponsorship"),
+    /** Opt-in consent timestamp, required where this is "sensitive data". */
+    workAuthConsentAt: timestamp("work_auth_consent_at", { withTimezone: true }),
+
+    // ── security & lifecycle ──
+    /**
+     * AUTH-008. Embedded as a JWT claim; a token whose claim is below this
+     * value is rejected. Incrementing it revokes every outstanding session on
+     * the next request, with no deploy and no cache flush.
+     */
+    sessionVersion: integer("session_version").notNull().default(0),
+    isPlatformAdmin: boolean("is_platform_admin").notNull().default(false),
+    suspendedAt: timestamp("suspended_at", { withTimezone: true }),
+    /** XPLAIN-003 — opted out of automated ranking. */
+    profilingOptOut: boolean("profiling_opt_out").notNull().default(false),
+    /** AUTH-012 — set at request; the purge job erases the row's PII. */
+    deletionRequestedAt: timestamp("deletion_requested_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    legalHold: boolean("legal_hold").notNull().default(false),
+    /** Two-letter US state, derived from the user's stated location. Used ONLY
+     *  to select which legal notices apply — never as a matching input. */
+    jurisdiction: varchar("jurisdiction", { length: 8 }),
 
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -164,6 +277,32 @@ export const jobs = pgTable(
     postedById: varchar("posted_by_id", { length: 36 }).references(() => users.id, {
       onDelete: "set null",
     }),
+
+    // ── WORK-002 ──
+    /** Three states: true, false, and null meaning unstated. Never inferred. */
+    sponsorshipAvailable: boolean("sponsorship_available"),
+
+    // ── LEGAL-002 pay transparency ──
+    /** Required in covered jurisdictions alongside a salary range. */
+    benefitsDescription: text("benefits_description"),
+    /** True when the employer themselves supplied compensation data. */
+    employerSuppliedPay: boolean("employer_supplied_pay").notNull().default(false),
+    /**
+     * The affirmative defence. Washington, Colorado, Delaware, Columbus and
+     * New Jersey all key third-party liability on employer CONSENT, so the two
+     * populations must be distinguishable in the data, not just in intent.
+     */
+    consentSource: consentSourceEnum("consent_source").notNull().default("CRAWLED"),
+
+    // ── TRUST-001 / JOB-003 ghost jobs ──
+    /** Set when a recruiter attests the vacancy is real, current and theirs. */
+    attestedAt: timestamp("attested_at", { withTimezone: true }),
+    attestedById: varchar("attested_by_id", { length: 36 }),
+    /** Advanced by the "is this still open?" prompt; drives 60-day auto-expiry. */
+    lastConfirmedAt: timestamp("last_confirmed_at", { withTimezone: true }),
+    expiryWarnedAt: timestamp("expiry_warned_at", { withTimezone: true }),
+    /** Consecutive successful syncs in which an ingested job was absent. */
+    missedSyncs: integer("missed_syncs").notNull().default(0),
 
     active: boolean("active").notNull().default(true),
     postedAt: timestamp("posted_at", { withTimezone: true }).notNull().defaultNow(),
@@ -418,3 +557,368 @@ export type JobSourceRow = typeof jobSources.$inferSelect;
 export type NewJobSource = typeof jobSources.$inferInsert;
 export type SourceKind = (typeof sourceKindEnum.enumValues)[number];
 export type SourceStatus = (typeof sourceStatusEnum.enumValues)[number];
+
+// ═════════════════════════════════════════════════════════════
+// PRD v1.0 — additions
+//
+// Everything below implements the P0 gap list in PRD §26. Grouped by the
+// feature IDs that required it so the mapping stays traceable.
+// ═════════════════════════════════════════════════════════════
+
+/**
+ * AUTH-006 / AUTH-007 / SEAT-002 / COMP-003 / NOTIF-001.
+ *
+ * Only a SHA-256 hash of the token is ever stored. A database dump therefore
+ * cannot be used to verify an email, reset a password, or join a company.
+ */
+export const emailTokens = pgTable(
+  "email_tokens",
+  {
+    id: id(),
+    userId: varchar("user_id", { length: 36 }).references(() => users.id, { onDelete: "cascade" }),
+    /** Set for invitations, where no user row exists yet. */
+    email: varchar("email", { length: 255 }),
+    tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+    purpose: tokenPurposeEnum("purpose").notNull(),
+    /** Free-form payload — the company id for an invite, the domain for a domain check. */
+    context: jsonb("context"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("email_token_hash_idx").on(t.tokenHash),
+    index("email_token_user_idx").on(t.userId, t.purpose, t.expiresAt),
+  ]
+);
+
+/**
+ * AUTH-009 — rate limiting.
+ *
+ * Serverless functions are stateless and horizontally scaled, so an in-memory
+ * counter silently does nothing. This is a fixed-window counter in Postgres:
+ * correct across every instance, and fast enough at MVP volume. Swap for Redis
+ * when write volume justifies it — the interface in src/lib/ratelimit.ts stays
+ * the same.
+ */
+export const rateLimits = pgTable(
+  "rate_limits",
+  {
+    /** "login:ip:1.2.3.4:29184713" — bucket is baked into the key. */
+    key: varchar("key", { length: 191 }).primaryKey(),
+    count: integer("count").notNull().default(0),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("rate_limit_expiry_idx").on(t.expiresAt)]
+);
+
+/** SEAT-001 — 1 COMPANY_ADMIN + N RECRUITER seats per company. */
+export const companyMembers = pgTable(
+  "company_members",
+  {
+    id: id(),
+    companyId: varchar("company_id", { length: 36 })
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    userId: varchar("user_id", { length: 36 })
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    seatRole: seatRoleEnum("seat_role").notNull().default("RECRUITER"),
+    status: memberStatusEnum("status").notNull().default("ACTIVE"),
+    joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("company_member_unique").on(t.companyId, t.userId),
+    index("company_member_status_idx").on(t.companyId, t.status),
+    // A user belongs to exactly one company at a time (SEAT-002 AC-4).
+    uniqueIndex("company_member_user_unique").on(t.userId),
+  ]
+);
+
+/** SEAT-002 — teammate invitations. */
+export const companyInvitations = pgTable(
+  "company_invitations",
+  {
+    id: id(),
+    companyId: varchar("company_id", { length: 36 })
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    email: varchar("email", { length: 255 }).notNull(),
+    seatRole: seatRoleEnum("seat_role").notNull().default("RECRUITER"),
+    tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+    invitedById: varchar("invited_by_id", { length: 36 }).references(() => users.id, {
+      onDelete: "set null",
+    }),
+    status: inviteStatusEnum("status").notNull().default("PENDING"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("company_invite_token_idx").on(t.tokenHash),
+    index("company_invite_lookup_idx").on(t.companyId, t.email, t.status),
+  ]
+);
+
+/** RESUME-001 — uploaded files. */
+export const resumes = pgTable(
+  "resumes",
+  {
+    id: id(),
+    userId: varchar("user_id", { length: 36 })
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    storageKey: text("storage_key").notNull(),
+    filename: text("filename").notNull(),
+    mime: varchar("mime", { length: 100 }).notNull(),
+    bytes: integer("bytes").notNull(),
+    version: integer("version").notNull().default(1),
+    isPrimary: boolean("is_primary").notNull().default(true),
+    parseStatus: parseStatusEnum("parse_status").notNull().default("PENDING"),
+    parsedAt: timestamp("parsed_at", { withTimezone: true }),
+    parseError: text("parse_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [index("resume_user_idx").on(t.userId, t.isPrimary)]
+);
+
+/**
+ * RESUME-003 — structured parse output.
+ *
+ * Held separately from the profile because parsed data is a SUGGESTION. It is
+ * never written to users.* until the candidate approves it (AC-4).
+ */
+export const resumeParses = pgTable(
+  "resume_parses",
+  {
+    id: id(),
+    resumeId: varchar("resume_id", { length: 36 })
+      .notNull()
+      .references(() => resumes.id, { onDelete: "cascade" }),
+    rawText: text("raw_text"),
+    structured: jsonb("structured"),
+    confidence: jsonb("confidence"),
+    engine: varchar("engine", { length: 40 }).notNull().default("jobsy-local"),
+    engineVersion: varchar("engine_version", { length: 20 }).notNull().default("1.0"),
+    appliedToProfile: boolean("applied_to_profile").notNull().default(false),
+    appliedAt: timestamp("applied_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("resume_parse_resume_idx").on(t.resumeId)]
+);
+
+/**
+ * TRUST-002 / MSG-004 — reports.
+ *
+ * `snapshot` freezes the reported content at report time so a later edit or
+ * delete cannot destroy the evidence.
+ */
+export const reports = pgTable(
+  "reports",
+  {
+    id: id(),
+    reporterId: varchar("reporter_id", { length: 36 })
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: reportKindEnum("kind").notNull(),
+    /** Id of the reported job / user / message / company. */
+    targetId: varchar("target_id", { length: 36 }).notNull(),
+    reason: reportReasonEnum("reason").notNull(),
+    detail: text("detail"),
+    snapshot: jsonb("snapshot").notNull(),
+    status: reportStatusEnum("status").notNull().default("OPEN"),
+    action: moderationActionEnum("action").notNull().default("NONE"),
+    resolvedById: varchar("resolved_by_id", { length: 36 }).references(() => users.id, {
+      onDelete: "set null",
+    }),
+    resolutionNote: text("resolution_note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("report_status_idx").on(t.status, t.createdAt),
+    index("report_target_idx").on(t.kind, t.targetId),
+  ]
+);
+
+/** MSG-004 — blocks. Directional rows; enforcement checks both directions. */
+export const blocks = pgTable(
+  "blocks",
+  {
+    id: id(),
+    blockerId: varchar("blocker_id", { length: 36 })
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    blockedId: varchar("blocked_id", { length: 36 })
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("block_unique").on(t.blockerId, t.blockedId),
+    index("block_blocked_idx").on(t.blockedId),
+  ]
+);
+
+/**
+ * LEGAL-009 — proof of what the user agreed to, and when.
+ *
+ * Enforceability turns on being able to show the user affirmatively assented to
+ * a specific document version. Without this row there is no evidence.
+ */
+export const termsAcceptances = pgTable(
+  "terms_acceptances",
+  {
+    id: id(),
+    userId: varchar("user_id", { length: 36 })
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    document: varchar("document", { length: 40 }).notNull(),
+    version: varchar("version", { length: 20 }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }).notNull().defaultNow(),
+    ip: varchar("ip", { length: 64 }),
+    userAgent: text("user_agent"),
+  },
+  (t) => [index("terms_user_idx").on(t.userId, t.document)]
+);
+
+/** LEGAL-001 / AUTH-012 / XPLAIN-003 / XPLAIN-004 — the privacy request ledger. */
+export const privacyRequests = pgTable(
+  "privacy_requests",
+  {
+    id: id(),
+    userId: varchar("user_id", { length: 36 })
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: privacyRequestKindEnum("kind").notNull(),
+    status: privacyRequestStatusEnum("status").notNull().default("RECEIVED"),
+    /** Two-letter state / territory used to pick the applicable SLA. */
+    jurisdiction: varchar("jurisdiction", { length: 8 }),
+    detail: text("detail"),
+    outcome: text("outcome"),
+    denialReason: text("denial_reason"),
+    /** Due date computed at intake — 15 days for opt-outs, 45 otherwise. */
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("privacy_req_status_idx").on(t.status, t.dueAt),
+    index("privacy_req_user_idx").on(t.userId, t.kind),
+  ]
+);
+
+/** XPLAIN-002 — proof an AEDT notice was delivered, per user per jurisdiction. */
+export const aedtNotices = pgTable(
+  "aedt_notices",
+  {
+    id: id(),
+    userId: varchar("user_id", { length: 36 })
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    jurisdiction: varchar("jurisdiction", { length: 8 }).notNull(),
+    noticeVersion: varchar("notice_version", { length: 20 }).notNull(),
+    /** Set when the notice must precede use by a fixed period (NYC: 10 business days). */
+    usableFrom: timestamp("usable_from", { withTimezone: true }),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("aedt_notice_unique").on(t.userId, t.jurisdiction, t.noticeVersion)]
+);
+
+/** NOTIF-001 — per-category preferences. Transactional mail is not listed and is never suppressed. */
+export const notificationPrefs = pgTable("notification_prefs", {
+  userId: varchar("user_id", { length: 36 })
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  newMatch: boolean("new_match").notNull().default(true),
+  newMessage: boolean("new_message").notNull().default(true),
+  recruiterInterest: boolean("recruiter_interest").notNull().default(true),
+  applicationStatus: boolean("application_status").notNull().default(true),
+  jobAlerts: boolean("job_alerts").notNull().default(false),
+  productUpdates: boolean("product_updates").notNull().default(false),
+  /** Lets an unsubscribe link work without a login (NOTIF-001 AC-4). */
+  unsubscribeTokenHash: varchar("unsubscribe_token_hash", { length: 64 }).notNull(),
+  suppressedAt: timestamp("suppressed_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** LEGAL-012 / TRUST-008 — append-only audit trail. Never updated, never deleted. */
+export const auditLog = pgTable(
+  "audit_log",
+  {
+    id: id(),
+    actorId: varchar("actor_id", { length: 36 }),
+    action: varchar("action", { length: 80 }).notNull(),
+    subjectType: varchar("subject_type", { length: 40 }),
+    subjectId: varchar("subject_id", { length: 36 }),
+    detail: jsonb("detail"),
+    ip: varchar("ip", { length: 64 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("audit_action_idx").on(t.action, t.createdAt),
+    index("audit_subject_idx").on(t.subjectType, t.subjectId),
+    index("audit_actor_idx").on(t.actorId, t.createdAt),
+  ]
+);
+
+/** APPLY-003 — application status transitions. */
+export const applicationEvents = pgTable(
+  "application_events",
+  {
+    id: id(),
+    applicationId: varchar("application_id", { length: 36 })
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    fromStatus: applicationStatusEnum("from_status"),
+    toStatus: applicationStatusEnum("to_status").notNull(),
+    actorId: varchar("actor_id", { length: 36 }).references(() => users.id, {
+      onDelete: "set null",
+    }),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("app_event_idx").on(t.applicationId, t.createdAt)]
+);
+
+/**
+ * MATCH-031 — voluntary EEO self-identification, for bias auditing only.
+ *
+ * ⚠️ NOTHING IN src/lib/matching MAY IMPORT THIS TABLE. The isolation is
+ * enforced by scripts/check-prohibited-inputs.mts, which fails the build if any
+ * matching module references it. See PRD MATCH-030 / MATCH-031.
+ */
+export const eeoSelfId = pgTable("eeo_self_id", {
+  userId: varchar("user_id", { length: 36 })
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  sexCategory: varchar("sex_category", { length: 40 }),
+  raceEthnicityCategory: varchar("race_ethnicity_category", { length: 60 }),
+  consentVersion: varchar("consent_version", { length: 20 }).notNull(),
+  collectedAt: timestamp("collected_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ── PRD v1.0 types ──
+export type TokenPurpose = (typeof tokenPurposeEnum.enumValues)[number];
+export type SeatRole = (typeof seatRoleEnum.enumValues)[number];
+export type MemberStatus = (typeof memberStatusEnum.enumValues)[number];
+export type InviteStatus = (typeof inviteStatusEnum.enumValues)[number];
+export type ParseStatus = (typeof parseStatusEnum.enumValues)[number];
+export type ReportKind = (typeof reportKindEnum.enumValues)[number];
+export type ReportReason = (typeof reportReasonEnum.enumValues)[number];
+export type ReportStatus = (typeof reportStatusEnum.enumValues)[number];
+export type ModerationAction = (typeof moderationActionEnum.enumValues)[number];
+export type PrivacyRequestKind = (typeof privacyRequestKindEnum.enumValues)[number];
+export type PrivacyRequestStatus = (typeof privacyRequestStatusEnum.enumValues)[number];
+export type ConsentSource = (typeof consentSourceEnum.enumValues)[number];
+export type ApplicationStatus = (typeof applicationStatusEnum.enumValues)[number];
+export type CompanyMember = typeof companyMembers.$inferSelect;
+export type CompanyInvitation = typeof companyInvitations.$inferSelect;
+export type Resume = typeof resumes.$inferSelect;
+export type ResumeParse = typeof resumeParses.$inferSelect;
+export type Report = typeof reports.$inferSelect;
+export type PrivacyRequest = typeof privacyRequests.$inferSelect;
+export type NotificationPrefs = typeof notificationPrefs.$inferSelect;
+export type AuditRow = typeof auditLog.$inferSelect;
