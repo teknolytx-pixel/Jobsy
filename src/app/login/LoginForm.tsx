@@ -170,7 +170,7 @@ export default function LoginForm({ linkedinEnabled }: { linkedinEnabled: boolea
                 borderRadius: 12,
                 cursor: "pointer",
                 // Full contrast. The cases above turned on exactly this.
-                color: "var(--fg, #12141c)",
+                color: "var(--txt)",
                 fontSize: 13.5,
                 lineHeight: 1.5,
               }}

@@ -26,6 +26,12 @@ export default function JobComposer({
     attest: false,
     /** LEGAL-002 — headcount drives the pay-transparency thresholds. */
     employeeCount: "",
+    /**
+     * LEGAL-002 — required wherever a pay-transparency rule applies, which
+     * includes every REMOTE role, because a remote role may be performed from
+     * a covered state.
+     */
+    benefits: "",
     /** WORK-002 — three states. "" means unstated, and is never inferred. */
     sponsorship: "" as "" | "YES" | "NO",
   });
@@ -59,6 +65,7 @@ export default function JobComposer({
         applyMethod: f.applyMethod,
         applyUrl: f.applyMethod === "EXTERNAL" ? f.applyUrl : null,
         attestCurrentVacancy: f.attest,
+        benefitsDescription: f.benefits.trim() || null,
         employeeCount: f.employeeCount ? Number(f.employeeCount) : null,
         sponsorshipAvailable: f.sponsorship === "" ? null : f.sponsorship === "YES",
       }),
@@ -161,6 +168,22 @@ export default function JobComposer({
           </label>
         ) : null}
 
+        <label className="field">
+          <span>
+            Benefits and other compensation
+            {f.remote === "REMOTE" ? " — required for remote roles" : ""}
+          </span>
+          <textarea
+            value={f.benefits}
+            onChange={(e) => set("benefits", e.target.value)}
+            placeholder="Health, dental and vision; 401(k) with 4% match; 20 days PTO; annual bonus target 10%; equity."
+          />
+          <small style={{ color: "var(--dim)", fontSize: 12 }}>
+            Sixteen states require this alongside the salary range. A remote role counts as covered,
+            because it can be performed from any of them.
+          </small>
+        </label>
+
         <div className="two">
           <label className="field">
             <span>Company headcount — optional</span>
@@ -200,7 +223,7 @@ export default function JobComposer({
             border: "1px solid var(--line, #e6e8f0)",
             borderRadius: 12,
             cursor: "pointer",
-            color: "var(--fg, #12141c)",
+            color: "var(--txt)",
             fontSize: 13.5,
             lineHeight: 1.5,
           }}
