@@ -174,8 +174,10 @@ export function renderQuery(d: DemandQuery, shape: QueryShape): string {
  */
 export async function demandQueries(
   shape: QueryShape = "PHRASE",
-  fallback: string[] = FALLBACK_QUERIES
+  fallback: string[] = FALLBACK_QUERIES,
+  limit: number = MAX_QUERIES
 ): Promise<string[]> {
+  const cap = Math.max(1, Math.min(limit, MAX_QUERIES));
   let signal: DemandQuery[];
   try {
     signal = await demandSignal();
@@ -183,9 +185,25 @@ export async function demandQueries(
     // Ingestion must not fail because the demand lookup did. A stale corpus is
     // recoverable; a cron job that dies leaves the corpus stale AND silent.
     console.warn("[demand] falling back to the static query list:", err);
-    return fallback;
+    return fallback.slice(0, cap);
   }
-  if (!signal.length) return fallback;
+  if (!signal.length) return fallback.slice(0, cap);
 
-  return signal.map((d) => renderQuery(d, shape));
+  return signal.slice(0, cap).map((d) => renderQuery(d, shape));
+}
+
+/**
+ * How many queries one run may spend against a metered provider.
+ *
+ * Divided over 31 days rather than 30, and floored, so the month can only ever
+ * come in UNDER the plan. The alternative — spend freely and stop when the
+ * provider says no — means ingestion silently dies partway through every month,
+ * which reads as "the site stopped working" rather than "the quota ran out".
+ *
+ * A budget too small for even one query still yields one: a provider that is
+ * configured but never called is worse than one that runs once a day.
+ */
+export function queriesPerRun(monthlyBudget: number, daysInMonth = 31): number {
+  if (!Number.isFinite(monthlyBudget) || monthlyBudget <= 0) return 1;
+  return Math.max(1, Math.min(MAX_QUERIES, Math.floor(monthlyBudget / daysInMonth)));
 }

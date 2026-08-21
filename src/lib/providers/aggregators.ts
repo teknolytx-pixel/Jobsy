@@ -1,4 +1,4 @@
-import { demandQueries } from "../demand";
+import { demandQueries, queriesPerRun } from "../demand";
 import { env } from "../env";
 import { extractSkills, inferSeniority } from "../skills";
 import {
@@ -74,7 +74,7 @@ export const jsearchProvider: JobProvider = {
 
   isConfigured: () => Boolean(env.jobs.rapidApiKey),
   // SRC-014 — phrases follow live candidate demand, not a constant.
-  boards: () => demandQueries("PHRASE", JSEARCH_QUERIES),
+  boards: () => demandQueries("PHRASE", JSEARCH_QUERIES, queriesPerRun(env.jobs.jsearchMonthlyBudget)),
 
   async fetchBoard(query: string): Promise<NormalizedJob[]> {
     const url = `https://jsearch.p.rapidapi.com/search?query=${encodeURIComponent(query)}&page=1&num_pages=1&date_posted=month`;

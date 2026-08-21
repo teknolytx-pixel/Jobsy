@@ -8,7 +8,7 @@
  */
 // Dynamic, matching backfill-geo.mts: tsx resolves the src tree reliably this
 // way, and a static named import of this module fails to bind under it.
-const { MIN_CANDIDATES, renderQuery, roleTerm } = await import("../src/lib/demand");
+const { MIN_CANDIDATES, renderQuery, roleTerm, queriesPerRun } = await import("../src/lib/demand");
 type DemandQuery = import("../src/lib/demand").DemandQuery;
 
 let pass = 0,
@@ -105,6 +105,22 @@ const many: DemandQuery[] = Array.from({ length: 30 }, (_, i) => ({
 check("TC-DEM-33 the query count is capped", select(many).length === 12, `${select(many).length}`);
 check("TC-DEM-34 the biggest demand group is queried first",
   select(many)[0].candidates === 7, `${select(many)[0].candidates} candidates`);
+
+console.log("\nMETERED PROVIDER BUDGET\n");
+
+// The failure this prevents: 12 queries a night against a 200-request plan
+// exhausts it around the 17th, and the last third of every month has no
+// ingestion at all — presenting as "the site stopped finding jobs".
+check("TC-DEM-40 the free JSearch plan stays inside its month",
+  queriesPerRun(200) * 31 <= 200, `${queriesPerRun(200)}/run → ${queriesPerRun(200) * 31}/month`);
+check("TC-DEM-41 a paid plan still respects the global cap",
+  queriesPerRun(100000) === 12, `${queriesPerRun(100000)}`);
+check("TC-DEM-42 a budget too small for one query a day still runs once",
+  queriesPerRun(5) === 1, `${queriesPerRun(5)}`);
+check("TC-DEM-43 a zero or nonsense budget degrades to one, not to zero",
+  queriesPerRun(0) === 1 && queriesPerRun(NaN) === 1);
+check("TC-DEM-44 a 1000-request plan spends more of it",
+  queriesPerRun(1000) === 12, `${queriesPerRun(1000)}`);
 
 console.log(`\n${pass} passed, 0 failed  —  demand-driven ingestion`.replace("0 failed", `${fail} failed`));
 process.exit(fail ? 1 : 0);

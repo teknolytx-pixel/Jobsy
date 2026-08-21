@@ -63,6 +63,22 @@ export const env = {
     get rapidApiKey() {
       return opt("RAPIDAPI_KEY");
     },
+    /**
+     * JSearch requests allowed per calendar month.
+     *
+     * This is a METERED provider on a hard cap: RapidAPI does not throttle you
+     * back to a slower rate when the plan is exhausted, it starts returning
+     * 429 and stops. So the run has to bound ITSELF. Twelve queries a night is
+     * 360 a month, which overruns a 200-request plan around the 17th and leaves
+     * the last third of every month with no ingestion at all — the failure
+     * looks like "the site stopped finding jobs" and gives no hint why.
+     *
+     * Defaults to the free Basic allowance. Raise it to match your plan.
+     */
+    get jsearchMonthlyBudget() {
+      const raw = Number(opt("JSEARCH_MONTHLY_BUDGET") ?? 200);
+      return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 200;
+    },
     /** Jooble free API key → Indeed + Monster + CareerBuilder aggregate */
     get joobleKey() {
       return opt("JOOBLE_API_KEY");
