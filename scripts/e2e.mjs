@@ -79,6 +79,9 @@ console.log("\nPUBLIC SURFACES\n");
   const feedUrl = body.match(/<url><!\[CDATA\[([^\]]+)\]\]><\/url>/)?.[1];
   check("Feed URLs point at /j/", Boolean(feedUrl?.includes("/j/")), feedUrl);
 
+  // Deliberately UNauthenticated: a bare GET is the provider health check, and
+  // a GET carrying the cron secret runs a real ingestion. Adding the header
+  // here would turn a registry assertion into a live third-party fetch.
   const provRes = await p.goto(`${BASE}/api/ingest`);
   const prov = await provRes.json();
   check("Provider registry exposed", prov.providers.length === 10, `${prov.providers.length} providers`);
@@ -322,6 +325,158 @@ console.log("\nCHAT ON MATCH\n");
   check("Reply persists", await c.locator(".bub.me").count() >= 1);
   await cc.close();
   await rc.close();
+}
+
+// ─────────────────────────────────────────────
+// JOB COMPOSER — the gap that produced three P0 bugs.
+//
+// Every one of them was the same shape: the API required a field the form
+// never rendered or never sent. The lifecycle suite could not see it, because
+// it posts JSON to /api/jobs directly and therefore always sends the field the
+// UI was forgetting. Only a browser driving the real form can catch that drift,
+// so this section fills the form the way a recruiter would and nothing else.
+//
+//   TRUST-001  attestCurrentVacancy — literal(true) server-side, absent in the UI
+//   PAY-*      benefitsDescription required for remote, no field in the UI
+//   LEGAL-008  the notice rendered in near-black on a near-black background
+console.log("\nJOB COMPOSER\n");
+{
+  const { p, ctx } = await session("composer");
+  await login(p, "recruiter@demo.jobsy");
+  await p.goto(`${BASE}/recruiter`);
+  await p.waitForTimeout(800);
+
+  const openComposer = async () => {
+    if (await p.locator(".sheet h3", { hasText: "Post a job" }).count()) return;
+    await p.click('button.iconbtn[title="Post a job"]');
+    await p.waitForSelector(".sheet", { timeout: 10000 });
+  };
+  await openComposer();
+
+  // 1. Every field the server requires must actually exist in the form.
+  //    Asserted as presence, not as a successful post, so a removed field fails
+  //    here with a name rather than as a confusing 400 further down.
+  const fields = {
+    "vacancy attestation": p.locator("#attest-vacancy"),
+    "country select": p.locator(".sheet label.field", { hasText: "Country the work happens in" }).locator("select"),
+    "postal code input": p.locator('.sheet input[placeholder="78701"]'),
+    "title input": p.locator('.sheet input[placeholder="Senior Frontend Engineer"]'),
+  };
+  for (const [label, loc] of Object.entries(fields)) {
+    check(`Composer renders the ${label}`, (await loc.count()) > 0);
+  }
+
+  // 2. TRUST-001 — the attestation is a separate affirmative act. Submitting
+  //    without it must not create a job. The checkbox carries `required`, so the
+  //    browser blocks it; asserting the attribute AND the blocked submit means
+  //    dropping either one fails.
+  const attest = p.locator("#attest-vacancy");
+  check("Attestation is required, not advisory", await attest.getAttribute("required") !== null);
+  const uniq = `E2E Composer Role ${Date.now()}`;
+  await p.fill('.sheet input[placeholder="Senior Frontend Engineer"]', uniq);
+  await p.fill('.sheet input[placeholder="Austin, TX"]', "Austin, TX");
+  await p.click('.sheet button.go');
+  await p.waitForTimeout(600);
+  check("Unattested post is refused", await p.locator(".sheet").count() > 0, "composer stayed open");
+
+  // 3. LEGAL-008 — the notice whose enforceability turns on being legible was
+  //    shipped twice in near-black on a near-black background, because the code
+  //    fell back to a CSS token this app does not define. Contrast is therefore
+  //    asserted, not eyeballed.
+  const contrast = await p.evaluate(() => {
+    const el = document.querySelector("#attest-vacancy-text");
+    if (!el) return null;
+    const lum = (c) => {
+      const [r, g, b] = c.match(/\d+(\.\d+)?/g).slice(0, 3).map(Number)
+        .map((v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    let bgEl = el, bg = "rgba(0, 0, 0, 0)";
+    while (bgEl && bg === "rgba(0, 0, 0, 0)") {
+      bg = getComputedStyle(bgEl).backgroundColor;
+      bgEl = bgEl.parentElement;
+    }
+    const a = lum(getComputedStyle(el).color), b = lum(bg);
+    return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+  });
+  check("Attestation notice meets WCAG AA contrast", contrast !== null && contrast >= 4.5,
+    contrast === null ? "element missing" : `${contrast.toFixed(2)}:1`);
+
+  // 4. RMT-005 — a remote role has to state its scope. Selecting Remote must
+  //    reveal the question, and it must be required: "just remote" is what
+  //    produced applications from people who could not lawfully take the job.
+  //
+  //    Addressed by its label rather than by index. The first draft of this
+  //    test used `.sheet select >> nth=2`, which is the employment-type select,
+  //    and "the scope question appeared" passed while nothing of the sort had
+  //    happened. Positional selectors move whenever a field is added above.
+  const fieldSelect = (labelText) =>
+    p.locator(".sheet label.field", { hasText: labelText }).locator("select");
+  const fieldInput = (labelText) =>
+    p.locator(".sheet label.field", { hasText: labelText }).locator("input");
+
+  await fieldSelect("Work style").selectOption("REMOTE");
+  await p.waitForTimeout(300);
+  const scopeSel = fieldSelect("Where can this remote role be performed from?");
+  const scopeVisible = (await scopeSel.count()) > 0;
+  check("Remote reveals the scope question", scopeVisible);
+  if (scopeVisible) {
+    check("Remote scope is required", (await scopeSel.getAttribute("required")) !== null);
+  }
+
+  // 5. The pay-transparency gate is satisfiable from the UI. It was not: the
+  //    server required benefitsDescription for remote roles and the form had
+  //    no benefits field at all, so the role was unpostable.
+  const benefits = p
+    .locator(".sheet label.field", { hasText: "Benefits and other compensation" })
+    .locator("textarea");
+  check("Benefits field exists for the remote pay-transparency gate", (await benefits.count()) > 0);
+
+  // 6. The happy path, end to end, through the real form.
+  await p
+    .locator(".sheet label.field")
+    .filter({ has: p.locator("span", { hasText: /^Company$/ }) })
+    .locator("input")
+    // Named so `npm run reset` sweeps it: the reset script deletes postings
+    // whose company matches "%E2E %". Without that, every run of this test
+    // leaves a posting owned by the demo recruiter, and the RECRUITER SOURCING
+    // section eventually opens onto one of them instead of the seeded job.
+    .fill("Jobsy E2E Labs");
+  await fieldSelect("Country the work happens in").selectOption("US");
+  await p.fill('.sheet input[placeholder="78701"]', "78701");
+  await scopeSel.selectOption("SAME_COUNTRY");
+  await p.fill('.sheet input[placeholder="150"]', "150");
+  await p.fill('.sheet input[placeholder="185"]', "185");
+  await p.fill('.sheet textarea >> nth=0', "Own the design system and the component library that every product team builds on.");
+  await p.fill('.sheet input[placeholder="React, TypeScript, GraphQL"]', "React, TypeScript, GraphQL");
+  await benefits.fill("Health, dental and vision; 401(k) with 4% match; 20 days PTO.");
+  await attest.check();
+  await p.click('.sheet button.go');
+  await p.waitForTimeout(2500);
+
+  // When this fails, say WHY. A blocked submit shows a native validation
+  // bubble, not a `.err` div, so reporting only the server error left the first
+  // run of this test saying "composer closed" about a composer that was open.
+  const errText = await p.locator(".sheet .err").innerText().catch(() => "");
+  const invalid = await p.evaluate(() =>
+    [...document.querySelectorAll(".sheet form :invalid")]
+      .map((el) => `${el.tagName.toLowerCase()}[${el.type ?? ""}]: ${el.validationMessage}`)
+      .slice(0, 4)
+  );
+  check(
+    "Publishing through the form succeeds",
+    (await p.locator(".sheet").count()) === 0,
+    errText || invalid.join(" | ") || "composer closed"
+  );
+
+  // 7. And the posting is really there — via My posts, which selects every
+  //    column on `jobs`, so a schema/migration drift surfaces here too.
+  await p.goto(`${BASE}/jobs`);
+  await p.waitForTimeout(800);
+  const body = await p.locator(".list").innerText().catch(() => "");
+  check("Posted role appears in My posts", body.includes(uniq), uniq);
+  await p.screenshot({ path: "/home/claude/shots/n11-composer.png" });
+  await ctx.close();
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

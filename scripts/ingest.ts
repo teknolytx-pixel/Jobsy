@@ -11,7 +11,7 @@ async function main() {
   for (const p of ALL_PROVIDERS) {
     const on = p.isConfigured();
     console.log(
-      `  ${on ? "✓" : "·"} ${p.label.padEnd(42)} ${on ? p.boards().join(", ") : "not configured"}`
+      `  ${on ? "✓" : "·"} ${p.label.padEnd(42)} ${on ? (await p.boards()).join(", ") : "not configured"}`
     );
   }
 

@@ -20,6 +20,24 @@ import {
   users,
   type RemotePref,
 } from "../src/db";
+import { resolveLocation } from "../src/lib/geo/resolve";
+import { UNKNOWN_COUNTRY } from "../src/lib/geo/countries";
+
+/**
+ * v1.1 — the seed has to place people and postings on the map.
+ *
+ * Geographic eligibility is a hard gate that fails closed (GEO-006), so a user
+ * or job with no country is invisible rather than merely unranked. The seed
+ * predated that rule and kept writing free text only, which meant a freshly
+ * seeded environment came up with an empty recruiter deck and looked broken —
+ * every demo candidate silently ineligible. Deriving the structured columns
+ * from the same free-text string keeps one source of truth in the fixtures.
+ */
+function geoFor(location: string | null | undefined) {
+  const r = resolveLocation(location);
+  if (r.country === UNKNOWN_COUNTRY) return null;
+  return { country: r.country, stateProvince: r.stateProvince, city: r.city };
+}
 
 /**
  * ADMIN-007 — the production guard.
@@ -81,7 +99,19 @@ const CANDIDATES: C[] = [
 async function upsertUser(v: Parameters<typeof users.$inferInsert extends never ? never : never> | typeof users.$inferInsert) {
   // AUTH-006 — seeded accounts arrive verified. They exist to be logged into,
   // and the verification email would go to a @demo.jobsy address nobody reads.
-  const withDefaults = { ...v, emailVerified: true };
+  const g = geoFor((v as { location?: string | null }).location);
+  const withDefaults = {
+    ...v,
+    emailVerified: true,
+    ...(g
+      ? {
+          currentCountry: g.country,
+          currentStateProvince: g.stateProvince,
+          currentCity: g.city,
+          searchCountry: g.country,
+        }
+      : {}),
+  };
   const [row] = await db
     .insert(users)
     .values(withDefaults)
@@ -160,7 +190,12 @@ async function main() {
   ];
 
   const jobRows = [];
-  for (const spec of jobSpecs) {
+  for (const base of jobSpecs) {
+    const g = geoFor(base.location);
+    const spec = {
+      ...base,
+      ...(g ? { countryCode: g.country, stateProvince: g.stateProvince, city: g.city } : {}),
+    };
     const found = await db
       .select({ id: jobs.id })
       .from(jobs)

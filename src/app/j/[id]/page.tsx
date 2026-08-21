@@ -6,6 +6,9 @@ import { env } from "@/lib/env";
 import { Avatar } from "@/components/ui";
 import { money, REMOTE_LABEL } from "@/components/format";
 import { safeJsonLd, stripHtml } from "@/lib/safeJson";
+import { toJobGeo, type JobRowLike } from "@/lib/geo/adapt";
+import { effectiveRemoteScope } from "@/lib/geo/eligibility";
+import { countriesInRegion, countryName, UNKNOWN_COUNTRY, US_STATES } from "@/lib/geo/countries";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +34,88 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
       description: row.job.description.slice(0, 200),
       type: "website",
     },
+  };
+}
+
+/**
+ * schema.org location, built from the v1.1 structured geography.
+ *
+ * The previous version hardcoded `addressCountry: "US"` and, for remote roles,
+ * `applicantLocationRequirements: Country USA`. That was survivable while every
+ * posting was American and "remote" meant nothing in particular. It is not
+ * survivable now: a London role would be published to Google for Jobs as a US
+ * role, and a role scoped to the EU would be advertised to US applicants who
+ * cannot take it — which is the exact failure BR-017 exists to prevent, leaking
+ * out through the structured data instead of through the deck.
+ *
+ * Where the country is genuinely unknown the field is OMITTED rather than
+ * guessed. Wrong structured data is worse than absent structured data: Google
+ * demotes feeds it finds inaccurate, and a candidate who travels for an
+ * interview that was never in their country pays for the guess.
+ */
+function placeFor(job: JobRowLike & { location: string }) {
+  const geo = toJobGeo(job);
+
+  // All-or-nothing. Splicing a structured city together with a legacy region
+  // produced "London, TX, GB" on a row whose free text still read "Austin, TX"
+  // — each half individually defensible, the pair nonsense. The legacy string
+  // is consulted only when the resolver got nothing from it at all.
+  const legacy = job.location.split(",");
+  const structured = geo.city || geo.stateProvince;
+  const locality = (structured ? geo.city : legacy[0]?.trim()) || undefined;
+  const region = (structured ? geo.stateProvince : legacy[1]?.trim()) || undefined;
+
+  return {
+    "@type": "Place",
+    address: {
+      "@type": "PostalAddress",
+      ...(locality ? { addressLocality: locality } : {}),
+      ...(region ? { addressRegion: region } : {}),
+      // The workplace's postal code, which is the employer's own published
+      // address. Nothing here is ever read back as a matching input.
+      ...(geo.postalCode ? { postalCode: geo.postalCode } : {}),
+      ...(geo.country !== UNKNOWN_COUNTRY ? { addressCountry: geo.country } : {}),
+    },
+  };
+}
+
+const asCountry = (code: string) => ({ "@type": "Country", name: countryName(code) });
+
+/**
+ * RMT-005 in schema.org form. An unscoped remote role is remote within its own
+ * country, never worldwide — so the default narrows the audience rather than
+ * widening it. WORLDWIDE omits the key entirely, which is how Google reads
+ * "anywhere"; claiming every country by name would be both wrong and unbounded.
+ */
+function applicantLocationRequirements(job: JobRowLike & { location: string }) {
+  const geo = toJobGeo(job);
+  const scope = effectiveRemoteScope(geo);
+
+  if (scope === "WORLDWIDE") return {};
+
+  const countries: string[] =
+    scope === "COUNTRIES"
+      ? geo.remoteScopeCountries
+      : scope === "REGION"
+        ? countriesInRegion(geo.remoteScopeRegion ?? "")
+        : geo.country !== UNKNOWN_COUNTRY
+          ? [geo.country]
+          : [];
+
+  if (scope === "STATES" && geo.remoteScopeStates.length) {
+    return {
+      applicantLocationRequirements: geo.remoteScopeStates.map((s) => ({
+        "@type": "State",
+        name: US_STATES[s.toUpperCase()] ?? s,
+      })),
+    };
+  }
+
+  const known = countries.filter((c) => c && c !== UNKNOWN_COUNTRY);
+  if (!known.length) return {};
+  return {
+    applicantLocationRequirements:
+      known.length === 1 ? asCountry(known[0]) : known.map(asCountry),
   };
 }
 
@@ -64,19 +149,10 @@ export default async function PublicJobPage({ params }: { params: Promise<{ id: 
       name: company.name,
       ...(company.website ? { sameAs: company.website } : {}),
     },
-    jobLocation:
-      job.remote === "REMOTE"
-        ? undefined
-        : {
-            "@type": "Place",
-            address: {
-              "@type": "PostalAddress",
-              addressLocality: job.location.split(",")[0]?.trim(),
-              addressRegion: job.location.split(",")[1]?.trim(),
-              addressCountry: "US",
-            },
-          },
-    ...(job.remote === "REMOTE" ? { jobLocationType: "TELECOMMUTE", applicantLocationRequirements: { "@type": "Country", name: "USA" } } : {}),
+    jobLocation: job.remote === "REMOTE" ? undefined : placeFor(job),
+    ...(job.remote === "REMOTE"
+      ? { jobLocationType: "TELECOMMUTE", ...applicantLocationRequirements(job) }
+      : {}),
     ...(job.salaryMin || job.salaryMax
       ? {
           baseSalary: {

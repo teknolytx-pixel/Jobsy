@@ -372,6 +372,57 @@ t("TC-GEO-32b", "two-letter tokens that are BOTH a US state and a country code",
   assert.equal(vancouver.stateProvince, "BC");
 });
 
+t("TC-GEO-32c", "ATS country-prefix notation resolves", () => {
+  // Greenhouse and Lever emit this constantly, and it was the single largest
+  // cause of unresolved locations in the real corpus.
+  const ny = resolveLocation("US-New York, US-Chicago, US-Atlanta");
+  assert.equal(ny.country, "US");
+  assert.equal(ny.stateProvince, null, "a multi-city posting must not claim one state");
+
+  // The ambiguous "CA-" prefix is arbitrated by the city, as everywhere else.
+  assert.equal(resolveLocation("CA-Toronto, CA-Montreal").country, "CA");
+  assert.equal(resolveLocation("CA-San Francisco").country, "US", "SF makes CA California");
+
+  // Genuinely cross-border postings stay UNKNOWN rather than picking a winner.
+  assert.equal(resolveLocation("Poland - Remote OR Romania - Remote").country, UNKNOWN_COUNTRY);
+});
+
+t("TC-GEO-32d", "city abbreviation lists resolve to one country", () => {
+  const r = resolveLocation("SF, NYC, SEA, CHI");
+  assert.equal(r.country, "US");
+  assert.equal(r.confidence, "INFERRED");
+  assert.equal(resolveLocation("NYC, SF").country, "US");
+  // A single abbreviation still works.
+  assert.equal(resolveLocation("BLR").country, "IN");
+});
+
+t("TC-GEO-32e", "a postal code glued to the state does not hide the state", () => {
+  const r = resolveLocation("Austin, TX 78701");
+  assert.equal(r.stateProvince, "TX");
+  assert.equal(r.city, "Austin");
+  assert.equal(r.postalCode, "78701");
+  assert.equal(r.confidence, "EXPLICIT");
+});
+
+t("TC-GEO-32f", "every separator real postings actually use", () => {
+  assert.equal(resolveLocation("Chicago and NYC").country, "US");
+  assert.equal(resolveLocation("New York/ San Francisco").country, "US");
+  assert.equal(resolveLocation("Berlin & Munich").country, "DE");
+  // Cross-border alternatives still refuse to pick a winner.
+  assert.equal(resolveLocation("London OR Dublin").country, UNKNOWN_COUNTRY);
+});
+
+t("TC-GEO-32g", "a country named inside a sentence, without false positives", () => {
+  assert.equal(resolveLocation("Remote in the US").country, "US");
+  assert.equal(resolveLocation("Work from anywhere in Canada").country, "CA");
+  assert.equal(resolveLocation("Taipei, Taiwan").country, "TW");
+  // The traps: these must NOT match a country.
+  assert.equal(resolveLocation("Indiana").country, "US", "Indiana is not India");
+  assert.equal(resolveLocation("Indiana").stateProvince, "IN");
+  assert.equal(resolveLocation("Chilean Office").country, UNKNOWN_COUNTRY, "not Chile");
+  assert.equal(resolveLocation("N/A").country, UNKNOWN_COUNTRY);
+});
+
 t("TC-GEO-33", "empty and meaningless locations are UNKNOWN", () => {
   for (const s of ["", "   ", "Remote", "Multiple locations"]) {
     assert.equal(resolveLocation(s).country, UNKNOWN_COUNTRY, `"${s}" must not resolve`);

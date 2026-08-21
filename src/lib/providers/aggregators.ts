@@ -1,3 +1,4 @@
+import { demandQueries } from "../demand";
 import { env } from "../env";
 import { extractSkills, inferSeniority } from "../skills";
 import {
@@ -72,7 +73,8 @@ export const jsearchProvider: JobProvider = {
   label: "JSearch / Google for Jobs (Indeed, LinkedIn, Glassdoor, ZipRecruiter, Monster)",
 
   isConfigured: () => Boolean(env.jobs.rapidApiKey),
-  boards: () => JSEARCH_QUERIES,
+  // SRC-014 — phrases follow live candidate demand, not a constant.
+  boards: () => demandQueries("PHRASE", JSEARCH_QUERIES),
 
   async fetchBoard(query: string): Promise<NormalizedJob[]> {
     const url = `https://jsearch.p.rapidapi.com/search?query=${encodeURIComponent(query)}&page=1&num_pages=1&date_posted=month`;
@@ -161,7 +163,7 @@ export const joobleProvider: JobProvider = {
   label: "Jooble (Indeed, Monster, CareerBuilder aggregate)",
 
   isConfigured: () => Boolean(env.jobs.joobleKey),
-  boards: () => ["software engineer|", "data engineer|", "designer|"],
+  boards: () => demandQueries("PIPE", ["software engineer|", "data engineer|", "designer|"]),
 
   async fetchBoard(board: string): Promise<NormalizedJob[]> {
     const [keywords, location] = board.split("|");
@@ -224,7 +226,7 @@ export const careerjetProvider: JobProvider = {
   label: "Careerjet (multi-board aggregate)",
 
   isConfigured: () => Boolean(env.jobs.careerjetAffid),
-  boards: () => ["software engineer|", "designer|"],
+  boards: () => demandQueries("PIPE", ["software engineer|", "designer|"]),
 
   async fetchBoard(board: string): Promise<NormalizedJob[]> {
     const [keywords, location] = board.split("|");

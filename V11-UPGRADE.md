@@ -18,33 +18,124 @@ determine sees nothing at all.
 That last part matters for your existing data. Every job and candidate created
 before this release stores location as a single free-text string, and the
 eligibility layer fails closed on an unknown country (GEO-006). **Run the
-backfill in Step 3 or your deck will look broken.**
+backfill in Step 4 or your deck will look broken.**
 
 ---
 
-## Step 1 — Migrate the database
+## The order to do this in
+
+The migration files ship inside the release zip, so the code has to be on disk
+before there is anything to migrate. Do it in exactly this order:
+
+1. **Step 1** — get the new code onto your machine (1a, 1b, 1c below)
+2. **Step 2** — run the migration
+3. **Step 3** — commit and push, so the live site gets the new code
+4. **Step 4** — backfill the structured locations
+5. **Step 5** — verify
+
+Running the migration before the code is on disk fails because the `.sql` files
+are not there yet. Pushing the code before the migration runs is worse: the new
+code selects columns that do not exist, so every page touching jobs or users
+errors until the migration catches up.
+
+## Step 1 — Get the new code onto your machine
+
+Nothing is deployed in this step and nothing is committed. You are only putting
+files on disk, which is what makes the migration possible.
+
+No new environment variables are needed anywhere in this upgrade.
+
+### 1a. Unzip into a staging folder
+
+Do this in Terminal rather than by double-clicking. macOS treats `Jobsy` and
+`jobsy` as the same name, so unzipping in Finder can silently merge into an
+existing folder or create a confusing `jobsy 2`.
 
 ```
-npx drizzle-kit migrate
+unzip -o ~/Downloads/jobsy-v1.1.zip -d ~/Downloads/jobsy-v11-staging
 ```
 
-Adds three enums and 29 columns. Purely additive: no `DROP`, no `TRUNCATE`, no
-`DELETE`, and every `NOT NULL` column carries a default, so existing rows are
-valid the moment the column appears.
+### 1b. Copy the new code into the repo
 
-Confirm:
+The repo is `~/Downloads/Jobsy_Dev/jobsy`. That is the folder GitHub Desktop
+watches, and it is NOT `~/Downloads/Jobsy`.
 
 ```
-SELECT count(*) FROM information_schema.tables WHERE table_schema='public';
+rsync -a --delete --exclude '.git' --exclude 'node_modules' --exclude '.next' --exclude '.vercel' --exclude '.env' --exclude '.env.*' --exclude '.DS_Store' ~/Downloads/jobsy-v11-staging/jobsy/ ~/Downloads/Jobsy_Dev/jobsy/
 ```
 
-Still 26 tables — v1.1 adds columns, not tables.
+`.env` is excluded on purpose. The release zip contains no `.env`, so without
+that exclusion `--delete` would remove the one holding your live credentials.
 
-## Step 2 — Deploy the code
+### 1c. Install dependencies in the repo folder
 
-Commit, push, let Vercel build. Nothing new is required in the environment.
+```
+cd ~/Downloads/Jobsy_Dev/jobsy && npm install
+```
 
-## Step 3 — Backfill the structured locations
+No new packages were added, but the repo folder needs `node_modules` for the
+Step 4 backfill to run. From here on, work in this folder only.
+
+### 1d. Check before committing
+
+```
+cd ~/Downloads/Jobsy_Dev/jobsy; echo "ENV:"; ls -l .env; echo "MIGRATIONS:"; ls drizzle/*.sql; echo "CHANGED:"; git status --short | wc -l; echo "DONE"
+```
+
+Expect: `.env` still present, four migration files ending `0003_...sql`, and a
+changed-file count in the dozens or more.
+
+**Do not commit yet.** The migration comes first.
+
+## Step 2 — Migrate the database
+
+From the repo folder, so it reads the `.env` sitting there:
+
+```
+cd ~/Downloads/Jobsy_Dev/jobsy && npx drizzle-kit migrate
+```
+
+This applies migrations 0002 and 0003 together: three enums and 29 columns.
+Purely additive — no `DROP`, no `TRUNCATE`, no `DELETE`, and every `NOT NULL`
+column carries a default, so existing rows are valid the moment the column
+appears.
+
+Confirm in the Neon SQL editor:
+
+```sql
+SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
+```
+
+Still 26 tables — v1.1 adds columns, not tables. If you want to check the
+columns themselves arrived:
+
+```sql
+SELECT count(*) FROM information_schema.columns
+WHERE table_name = 'jobs' AND column_name IN ('country_code', 'postal_code', 'remote_scope');
+```
+
+Expect `3`. A `column ... does not exist` error anywhere means this step has not
+run yet.
+
+## Step 3 — Commit and push
+
+GitHub Desktop, with **Current Repository** set to `jobsy`:
+
+1. Summary: `v1.1 — geographic eligibility, postal identity, cross-source dedupe`
+2. **Commit to main**
+3. **Push origin**
+
+Vercel builds automatically. Watch it at your project's Deployments tab.
+
+Then confirm the right build went live: the newest deployment should show your
+commit hash and branch `main`, not "Redeploy of…". If the blue **Production**
+badge sits on an older redeploy, open your commit's row and use **Promote to
+Production**.
+
+Load your site and open the job composer. The new **Postal / ZIP code** and
+**Country** fields should be there. If they are, the code is live.
+
+## Step 4 — Backfill the structured locations
 
 This resolves `"Austin, TX"` into `US / TX / Austin` for every existing row.
 
@@ -76,7 +167,7 @@ The unresolved remainder is the honest cost of the conservative choice: a
 posting that does not say where the work happens does not reach anyone. Those
 jobs stay hidden until a recruiter edits them.
 
-## Step 4 — Check the result
+## Step 5 — Check the result
 
 ```sql
 SELECT

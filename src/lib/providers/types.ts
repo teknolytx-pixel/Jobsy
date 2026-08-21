@@ -32,8 +32,14 @@ export interface JobProvider {
   readonly label: string;
   /** False when required credentials are absent — ingestion skips it cleanly. */
   isConfigured(): boolean;
-  /** One "board" per call (a Greenhouse token, an Adzuna query, …). */
-  boards(): string[];
+  /**
+   * One "board" per call (a Greenhouse token, an Adzuna query, …).
+   *
+   * May be async: the query-based aggregators derive their phrases from live
+   * candidate demand (SRC-014) rather than a constant, and that needs a read.
+   * ATS providers stay synchronous — their boards are a config list.
+   */
+  boards(): string[] | Promise<string[]>;
   fetchBoard(board: string): Promise<NormalizedJob[]>;
 }
 

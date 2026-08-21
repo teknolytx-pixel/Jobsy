@@ -207,7 +207,8 @@ for (const p of ALL_PROVIDERS) {
   }
 
   try {
-    const board = p.boards()[0];
+    // boards() is async for the demand-driven aggregators (SRC-014).
+    const board = (await p.boards())[0];
     const out = await p.fetchBoard(board);
     const j = out[0];
     const ok =

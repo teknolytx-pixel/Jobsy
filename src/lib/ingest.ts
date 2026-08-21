@@ -205,7 +205,7 @@ export async function ingestAll(): Promise<IngestSummary[]> {
 
   const out: IngestSummary[] = [];
   for (const p of providers) {
-    for (const board of p.boards()) {
+    for (const board of await p.boards()) {
       out.push(await runBoard(p, board));
       await new Promise((r) => setTimeout(r, 250)); // be a polite client
     }

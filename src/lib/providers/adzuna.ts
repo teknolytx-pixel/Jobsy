@@ -1,3 +1,4 @@
+import { demandQueries } from "../demand";
 import { env } from "../env";
 import { extractSkills, inferSeniority } from "../skills";
 import {
@@ -46,7 +47,7 @@ export const adzunaProvider: JobProvider = {
   label: "Adzuna",
 
   isConfigured: () => Boolean(env.jobs.adzunaId && env.jobs.adzunaKey),
-  boards: () => DEFAULT_QUERIES,
+  boards: () => demandQueries("PIPE", DEFAULT_QUERIES),
 
   async fetchBoard(board: string): Promise<NormalizedJob[]> {
     const [what, where] = board.split("|");

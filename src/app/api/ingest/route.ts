@@ -36,14 +36,21 @@ export async function GET(req: Request) {
   if (authorized(req) && req.headers.get("authorization")) return runIngest();
 
   const sources = await listSources().catch(() => []);
-  return NextResponse.json({
-    // broad, query-based discovery
-    providers: ALL_PROVIDERS.map((p) => ({
+  // boards() is async for the demand-driven aggregators (SRC-014). Awaiting it
+  // is not optional: a Promise reaches NextResponse.json as `{}` at best and
+  // takes the whole health check down with a 500 at worst, which is exactly
+  // what it did the first time this shipped.
+  const providers = await Promise.all(
+    ALL_PROVIDERS.map(async (p) => ({
       source: p.source,
       label: p.label,
       configured: p.isConfigured(),
-      boards: p.isConfigured() ? p.boards() : [],
-    })),
+      boards: p.isConfigured() ? await p.boards() : [],
+    }))
+  );
+  return NextResponse.json({
+    // broad, query-based discovery
+    providers,
     // targeted: every job these named employers post
     connectedCompanies: sources.map((s) => ({
       id: s.id,
