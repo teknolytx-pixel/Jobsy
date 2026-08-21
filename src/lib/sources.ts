@@ -227,7 +227,18 @@ export async function syncAllSources(
     .select()
     .from(jobSources)
     .where(eq(jobSources.enabled, true))
-    .orderBy(asc(sql`${jobSources.lastRunAt} nulls first`))
+    // SRC-016 — this line threw on every call.
+    //
+    // `asc(sql\`col nulls first\`)` renders as `order by asc(col nulls first)`,
+    // which Postgres rejects outright: `syntax error at or near "asc"`. The
+    // direction and the null placement are one clause in SQL, not a function
+    // wrapping an expression, so both go in the fragment.
+    //
+    // Nothing caught it because nothing ever called this against a database:
+    // the unit suites stub fetch and never open a connection, and the lifecycle
+    // suite only asserted that /api/ingest REJECTS an unauthorised caller — it
+    // never made an authorised one. See scripts/test-queries.mts.
+    .orderBy(sql`${jobSources.lastRunAt} asc nulls first`)
     .limit(opts.limit ?? 200);
 
   const results: SyncResult[] = [];

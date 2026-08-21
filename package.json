@@ -23,13 +23,14 @@
     "guard": "tsx scripts/check-prohibited-inputs.mts",
     "test:compliance": "tsx scripts/test-compliance.mts",
     "test:security": "tsx scripts/test-security.mts",
-    "test:lifecycle": "tsx scripts/e2e-lifecycle.mjs",
+    "test:lifecycle": "npm run test:queries && tsx scripts/e2e-lifecycle.mjs",
     "verify": "npm run typecheck && npm run guard && npm run test && npm run build",
     "test:e2e:sources": "SEED_PASSWORD=local-e2e-password node scripts/e2e-sources.mjs",
     "maintenance": "tsx scripts/maintenance.mts",
     "test:geo": "tsx scripts/test-geo.mts",
     "backfill:geo": "tsx scripts/backfill-geo.mts",
-    "test:demand": "tsx scripts/test-demand.mts"
+    "test:demand": "tsx scripts/test-demand.mts",
+    "test:queries": "tsx scripts/test-queries.mts"
   },
   "dependencies": {
     "bcryptjs": "3.0.3",
