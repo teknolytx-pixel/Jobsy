@@ -48,10 +48,13 @@ export default function CandidateSwipe({
   me,
   counts,
   hasJobPosts,
+  geo,
 }: {
   me: { id: string; name: string; image: string | null };
   counts: { applied: number; matches: number };
   hasJobPosts: boolean;
+  /** GEO-007 — why the deck may be short. */
+  geo?: { considered: number; excludedByGeography: number; topReason: string | null };
 }) {
   const [cards, setCards] = useState<JobCard[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -254,17 +257,32 @@ export default function CandidateSwipe({
           renderCard={renderCard}
           onSwipe={onSwipe}
           emptyState={
-            <div className="empty">
-              <div className="big">🎉</div>
-              <h3>You&rsquo;ve seen every job</h3>
-              <p>
-                New postings land every time ingestion runs. Check your matches, or widen your skills
-                in your profile to pull in more.
-              </p>
-              <a className="btn ghost" href="/matches" style={{ maxWidth: 220 }}>
-                See matches
-              </a>
-            </div>
+            geo && geo.excludedByGeography > 0 ? (
+              <div className="empty">
+                <div className="big">🌍</div>
+                <h3>You&rsquo;ve seen every job open where you work</h3>
+                <p>
+                  {geo.excludedByGeography} of the {geo.considered} live postings are based
+                  somewhere you haven&rsquo;t told us you&rsquo;d work.
+                </p>
+                {geo.topReason ? <p style={{ color: "var(--dim)" }}>{geo.topReason}</p> : null}
+                <a className="btn ghost" href="/profile" style={{ maxWidth: 260 }}>
+                  Change where you&rsquo;d work
+                </a>
+              </div>
+            ) : (
+              <div className="empty">
+                <div className="big">🎉</div>
+                <h3>You&rsquo;ve seen every job</h3>
+                <p>
+                  New postings land every time ingestion runs. Check your matches, or widen your
+                  skills in your profile to pull in more.
+                </p>
+                <a className="btn ghost" href="/matches" style={{ maxWidth: 220 }}>
+                  See matches
+                </a>
+              </div>
+            )
           }
         />
       )}

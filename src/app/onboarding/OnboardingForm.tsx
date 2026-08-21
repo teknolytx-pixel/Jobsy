@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { COUNTRIES } from "@/lib/geo/countries";
 
 type Initial = {
   name: string;
@@ -13,6 +14,8 @@ type Initial = {
   availability: string;
   bio: string;
   skills: string[];
+  /** CLP-001 — the single most consequential field on this form. */
+  currentCountry: string | null;
 };
 
 export default function OnboardingForm({
@@ -25,6 +28,7 @@ export default function OnboardingForm({
   const router = useRouter();
   const [f, setF] = useState({
     ...initial,
+    currentCountry: initial.currentCountry ?? "",
     salaryTarget: initial.salaryTarget ?? 0,
     skills: initial.skills.join(", "),
   });
@@ -50,6 +54,7 @@ export default function OnboardingForm({
         name: f.name,
         headline: f.headline,
         location: f.location,
+        currentCountry: f.currentCountry || null,
         remotePref: f.remotePref,
         yearsExp: Number(f.yearsExp) || 0,
         salaryTarget: Number(f.salaryTarget) || null,
@@ -113,6 +118,22 @@ export default function OnboardingForm({
                 required
               />
             </label>
+            <label className="field">
+              <span>Country</span>
+              <select
+                value={f.currentCountry}
+                onChange={(e) => set("currentCountry", e.target.value)}
+                required
+              >
+                <option value="">Choose…</option>
+                {Object.entries(COUNTRIES).map(([code, name]) => (
+                  <option key={code} value={code}>{name}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="two">
             <label className="field">
               <span>Work style</span>
               <select value={f.remotePref} onChange={(e) => set("remotePref", e.target.value)}>

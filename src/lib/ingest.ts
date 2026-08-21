@@ -1,6 +1,8 @@
 import { and, eq, lt, ne, sql } from "drizzle-orm";
 import { companies, db, ingestRuns, jobs } from "@/db";
 import { activeProviders, type JobProvider, type NormalizedJob } from "./providers";
+import { resolveLocation, UNKNOWN_COUNTRY } from "./geo";
+import { dedupeKey, preferCanonical } from "./dedupe";
 
 export type IngestSummary = {
   source: string;
@@ -33,6 +35,22 @@ async function companyIdFor(j: NormalizedJob): Promise<string> {
 
 export async function upsertJob(j: NormalizedJob): Promise<"created" | "updated"> {
   const companyId = await companyIdFor(j);
+
+  // ── FSD v1.1 §29 / §30 — structure the location at the point of ingestion ──
+  // Nobody is present to ask, so we resolve what the feed gave us and accept
+  // UNKNOWN where it is genuinely unclear. UNKNOWN fails closed in the
+  // eligibility layer (GEO-006), which is the intended outcome: a posting that
+  // does not say where the work happens should not reach anyone.
+  const place = resolveLocation(j.location);
+
+  // RMT-005 / BR-017 — the load-bearing default. A feed that says "Remote" and
+  // nothing else is remote WITHIN ITS OWN COUNTRY, never worldwide. The scope
+  // is stamped DEFAULTED so a later reader can tell it was inferred, not stated.
+  const isRemote = String(j.remote).toUpperCase() === "REMOTE";
+  const scopeFromFeed = /\b(anywhere in the world|worldwide|work from anywhere|global(?:ly)?)\b/i.test(
+    `${j.title}\n${j.description ?? ""}\n${j.location ?? ""}`
+  );
+
   const values = {
     source: j.source,
     externalId: j.externalId,
@@ -56,6 +74,27 @@ export async function upsertJob(j: NormalizedJob): Promise<"created" | "updated"
     syncedAt: new Date(),
     active: true,
     raw: (j.raw ?? {}) as object,
+
+    // ── FSD v1.1 §36.1 ──
+    countryCode: place.country === UNKNOWN_COUNTRY ? null : place.country,
+    stateProvince: place.stateProvince,
+    city: place.city,
+    // Identity, pulled out of whatever string the board gave us.
+    postalCode: place.postalCode,
+    remoteScope: isRemote ? (scopeFromFeed ? ("WORLDWIDE" as const) : ("SAME_COUNTRY" as const)) : null,
+    remoteScopeSource: isRemote ? (scopeFromFeed ? "EMPLOYER" : "DEFAULTED") : null,
+
+    // SRC-012 — discovered by us, with no recruiter in the loop.
+    origin: "EXTERNALLY_DISCOVERED" as const,
+    dedupeKey: dedupeKey({
+      title: j.title,
+      companyName: j.companyName,
+      location: j.location,
+      countryCode: place.country === UNKNOWN_COUNTRY ? null : place.country,
+      stateProvince: place.stateProvince,
+      postalCode: place.postalCode,
+      city: place.city,
+    }),
   };
 
   const existing = await db
@@ -68,10 +107,49 @@ export async function upsertJob(j: NormalizedJob): Promise<"created" | "updated"
     await db.update(jobs).set(values).where(eq(jobs.id, existing[0].id));
     return "updated";
   }
-  await db.insert(jobs).values(values).onConflictDoNothing({
-    target: [jobs.source, jobs.externalId],
-  });
+  const [inserted] = await db
+    .insert(jobs)
+    .values(values)
+    .onConflictDoNothing({ target: [jobs.source, jobs.externalId] })
+    .returning({ id: jobs.id });
+
+  if (inserted) await linkDuplicates(inserted.id, values.dedupeKey);
   return "created";
+}
+
+/**
+ * SRC-007 — consolidate the same role arriving from several sources.
+ *
+ * We do not delete the loser. Its source URL, publisher and sync history are
+ * evidence about where a posting was seen, which matters for the ghost-jobs
+ * work and for any later question about provenance. We point it at the winner
+ * instead, and the deck only ever surfaces postings whose canonicalJobId is
+ * null.
+ */
+export async function linkDuplicates(jobId: string, key: string | null): Promise<void> {
+  if (!key) return;
+
+  const siblings = await db
+    .select({
+      id: jobs.id,
+      origin: jobs.origin,
+      consentSource: jobs.consentSource,
+      postedAt: jobs.postedAt,
+    })
+    .from(jobs)
+    .where(and(eq(jobs.dedupeKey, key), eq(jobs.active, true)));
+
+  if (siblings.length < 2) return;
+
+  const winner = siblings.reduce((best, cur) => preferCanonical(best, cur));
+
+  for (const s of siblings) {
+    await db
+      .update(jobs)
+      .set({ canonicalJobId: s.id === winner.id ? null : winner.id })
+      .where(eq(jobs.id, s.id));
+  }
+  void jobId;
 }
 
 async function runBoard(p: JobProvider, board: string): Promise<IngestSummary> {

@@ -135,6 +135,9 @@ const newEmail = `tester${Date.now()}@demo.jobsy`;
   // incomplete profile is rejected
   await p.fill('input[placeholder="Senior Frontend Engineer"]', "Frontend Engineer");
   await p.fill('input[placeholder="Austin, TX"]', "Austin, TX");
+  // FSD v1.1 CLP-001 — country is now part of onboarding. Without it the form
+  // will not submit at all, which would mask the skills validation this checks.
+  await p.selectOption("select", { value: "US" }).catch(() => {});
   await p.fill('input[placeholder="React, TypeScript, GraphQL, SQL"]', "React");
   await p.click('button[type="submit"]');
   await p.waitForTimeout(600);

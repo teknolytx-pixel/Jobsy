@@ -141,6 +141,29 @@ export const privacyRequestStatusEnum = pgEnum("privacy_request_status", [
 
 export const consentSourceEnum = pgEnum("consent_source", ["EMPLOYER_SUBMITTED", "CRAWLED"]);
 
+/** RMT-002 — the geographic scope of a remote role. Never assume WORLDWIDE. */
+export const remoteScopeEnum = pgEnum("remote_scope", [
+  "SAME_COUNTRY",
+  "COUNTRIES",
+  "STATES",
+  "REGION",
+  "WORLDWIDE",
+]);
+
+/** SRC-012 — three job origins, not two. */
+export const jobOriginEnum = pgEnum("job_origin", [
+  "JOBSY_CREATED",
+  "RECRUITER_IMPORTED",
+  "EXTERNALLY_DISCOVERED",
+]);
+
+/** CLP-006 — how far the candidate will move for work. */
+export const relocationEnum = pgEnum("relocation_willingness", [
+  "NONE",
+  "DOMESTIC",
+  "INTERNATIONAL",
+]);
+
 const id = () =>
   varchar("id", { length: 36 })
     .primaryKey()
@@ -232,12 +255,39 @@ export const users = pgTable(
      *  to select which legal notices apply — never as a matching input. */
     jurisdiction: varchar("jurisdiction", { length: 8 }),
 
+    // ── FSD v1.1 §36.2 — CandidateLocation ──
+    // Where the candidate LIVES and where they want to WORK, kept apart.
+    // Deliberately contains no nationality, citizenship or immigration-status
+    // field: country of residence plus the employer-stated right to work in a
+    // jurisdiction answers every rule in §30–§35, and the protected version of
+    // the question cannot then be asked by accident. See FSD §38.1.
+    currentCountry: varchar("current_country", { length: 2 }),
+    currentStateProvince: varchar("current_state_province", { length: 64 }),
+    currentCity: text("current_city"),
+    /**
+     * OPTIONAL, and it stays optional. It improves radius accuracy for
+     * local-only roles and nothing else. Never a matching input, never a
+     * recruiter-settable filter — see src/lib/geo/postal.ts.
+     */
+    currentPostalCode: varchar("current_postal_code", { length: 12 }),
+    /** CLP-002 — defaults to currentCountry when null. */
+    searchCountry: varchar("search_country", { length: 2 }),
+    preferredCountries: text("preferred_countries").array().notNull().default([]),
+    preferredRegions: text("preferred_regions").array().notNull().default([]),
+    preferredCities: text("preferred_cities").array().notNull().default([]),
+    /** CLP-004 — cross-border matching is opt-in, off by default (BR-014). */
+    internationalSearchEnabled: boolean("international_search_enabled").notNull().default(false),
+    /** CLP-005 — empty means same country only; ["*"] means anywhere. */
+    remoteEligibleCountries: text("remote_eligible_countries").array().notNull().default([]),
+    relocationWillingness: relocationEnum("relocation_willingness").notNull().default("NONE"),
+
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     uniqueIndex("users_linkedin_sub_idx").on(t.linkedinSub),
     index("users_role_ready_idx").on(t.role, t.profileReady),
+    index("users_current_country_idx").on(t.currentCountry),
   ]
 );
 
@@ -304,6 +354,46 @@ export const jobs = pgTable(
     /** Consecutive successful syncs in which an ingested job was absent. */
     missedSyncs: integer("missed_syncs").notNull().default(0),
 
+    // ── FSD v1.1 §36.1 — JobLocation ──
+    // `location` above stays as the human string we display. These are what the
+    // eligibility layer actually reads, because inferring geography from free
+    // text is the root cause §30–§33 exists to prevent.
+    countryCode: varchar("country_code", { length: 2 }),
+    stateProvince: varchar("state_province", { length: 64 }),
+    city: text("city"),
+    /**
+     * Identity, not screening. country + state + postal is the unique place
+     * key used for cross-source de-duplication, and the ZIP3 prefix is used for
+     * radius arithmetic in the eligibility layer. It is unreachable from the
+     * scoring engine, which the MATCH-030 guard enforces: Illinois HB 3773
+     * names ZIP explicitly as a banned proxy. See src/lib/geo/postal.ts.
+     */
+    postalCode: varchar("postal_code", { length: 12 }),
+    /** RMT-001. Null means the employer stated no scope — RMT-005 applies. */
+    remoteScope: remoteScopeEnum("remote_scope"),
+    remoteScopeCountries: text("remote_scope_countries").array().notNull().default([]),
+    remoteScopeStates: text("remote_scope_states").array().notNull().default([]),
+    remoteScopeRegion: varchar("remote_scope_region", { length: 32 }),
+    /** Whether the scope was stated by the employer or defaulted under RMT-005. */
+    remoteScopeSource: varchar("remote_scope_source", { length: 16 }),
+    /** LOC-001 – LOC-003. */
+    localOnly: boolean("local_only").notNull().default(false),
+    localRadiusMiles: integer("local_radius_miles"),
+    /** LOC-006 — why the role needs local presence. Cheap now, costly later. */
+    localJustification: text("local_justification"),
+    relocationAccepted: boolean("relocation_accepted").notNull().default(false),
+    allowedCountries: text("allowed_countries").array().notNull().default([]),
+    excludedCountries: text("excluded_countries").array().notNull().default([]),
+
+    // ── SRC-007 / SRC-012 ──
+    /** Three origins. `consentSource` above answers a different question: who
+     *  supplied the pay data, which is a pay-transparency liability question. */
+    origin: jobOriginEnum("origin").notNull().default("EXTERNALLY_DISCOVERED"),
+    /** Cross-source identity: normalised title + company + location. */
+    dedupeKey: varchar("dedupe_key", { length: 191 }),
+    /** Set on a duplicate, pointing at the posting we surface instead. */
+    canonicalJobId: varchar("canonical_job_id", { length: 36 }),
+
     active: boolean("active").notNull().default(true),
     postedAt: timestamp("posted_at", { withTimezone: true }).notNull().defaultNow(),
     syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
@@ -313,6 +403,10 @@ export const jobs = pgTable(
     uniqueIndex("jobs_source_external_idx").on(t.source, t.externalId),
     index("jobs_active_posted_idx").on(t.active, t.postedAt),
     index("jobs_posted_by_idx").on(t.postedById),
+    index("jobs_country_active_idx").on(t.countryCode, t.active),
+    index("jobs_dedupe_key_idx").on(t.dedupeKey),
+    index("jobs_place_idx").on(t.countryCode, t.stateProvince, t.postalCode),
+    index("jobs_canonical_idx").on(t.canonicalJobId),
   ]
 );
 

@@ -210,6 +210,8 @@ await t("TC-AUTH-006-05", "an unverified user cannot post a job", async () => {
     location: "Austin, TX",
     description: "A description long enough to satisfy the minimum length requirement here.",
     attestCurrentVacancy: true,
+    // FSD v1.1 GEO-001 — country is required for a role posted in-app.
+    countryCode: "US",
   });
   eq(r.status, 403);
   eq(r.json.code, "EMAIL_NOT_VERIFIED");
@@ -474,6 +476,8 @@ await t("TC-TRUST-004-01", "a discriminatory posting is blocked before publicati
     salaryMin: 150,
     salaryMax: 185,
     attestCurrentVacancy: true,
+    // FSD v1.1 GEO-001 — country is required for a role posted in-app.
+    countryCode: "US",
   });
   eq(r.status, 400);
   eq(r.json.code, "DISCRIMINATORY_CONTENT");
@@ -488,6 +492,8 @@ await t("TC-LEGAL-002-01", "a covered-jurisdiction posting without pay is blocke
     location: "San Francisco, CA",
     description: "Own the analytics workspace. Requirements: 5+ years with React and TypeScript.",
     attestCurrentVacancy: true,
+    // FSD v1.1 GEO-001 — country is required for a role posted in-app.
+    countryCode: "US",
   });
   eq(r.status, 400);
   eq(r.json.code, "PAY_TRANSPARENCY_REQUIRED");
@@ -503,6 +509,8 @@ await t("TC-LEGAL-002-05", "Washington additionally requires a benefits descript
     salaryMin: 150,
     salaryMax: 185,
     attestCurrentVacancy: true,
+    // FSD v1.1 GEO-001 — country is required for a role posted in-app.
+    countryCode: "US",
   });
   eq(r.status, 400);
   assert(r.json.problems.includes("BENEFITS_REQUIRED"));
@@ -524,6 +532,8 @@ await t("TC-JOB-001-01", "a compliant posting is published", async () => {
     salaryMax: 185,
     benefitsDescription: "Medical, dental, vision, 401k with 4% match, 20 days PTO.",
     attestCurrentVacancy: true,
+    // FSD v1.1 GEO-001 — country is required for a role posted in-app.
+    countryCode: "US",
   });
   eq(r.status, 201);
   jobId = r.json.jobId;
@@ -540,6 +550,8 @@ await t("TC-JOB-001-07", "script tags in a description do not survive as executa
     salaryMin: 140,
     salaryMax: 180,
     attestCurrentVacancy: true,
+    // FSD v1.1 GEO-001 — country is required for a role posted in-app.
+    countryCode: "US",
   });
   eq(r.status, 201);
   const page = await rec.get(`/j/${r.json.jobId}`);
@@ -556,6 +568,8 @@ await t("TC-COMP-003-04", "an unverified company is capped at 3 active postings"
       salaryMin: 100,
       salaryMax: 140,
       attestCurrentVacancy: true,
+    // FSD v1.1 GEO-001 — country is required for a role posted in-app.
+    countryCode: "US",
     });
   const third = await mk(3);
   const fourth = await mk(4);

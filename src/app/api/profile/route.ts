@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { companies, db, users } from "@/db";
 import { AuthError, requireUser } from "@/lib/auth";
 import { normalizeSkills } from "@/lib/skills";
+import { normalisePostalCode, resolveLocation, toCountryCode, UNKNOWN_COUNTRY } from "@/lib/geo";
 
 const Body = z.object({
   name: z.string().min(1).optional(),
@@ -19,6 +20,24 @@ const Body = z.object({
   openToOffers: z.boolean().optional(),
   title: z.string().max(120).optional(),
   companyName: z.string().max(120).optional(),
+
+  // ── FSD v1.1 §36.2 — CandidateLocation (CLP-001 – CLP-006) ──
+  // No nationality, citizenship or immigration-status field appears here, and
+  // none may be added: country of residence plus the employer-stated right to
+  // work answers every rule in §30–§35. CLP-007 / FSD §38.1.
+  currentCountry: z.string().length(2).nullable().optional(),
+  currentStateProvince: z.string().max(64).nullable().optional(),
+  currentCity: z.string().max(120).nullable().optional(),
+  /** Optional. Improves radius accuracy for local-only roles, nothing else. */
+  currentPostalCode: z.string().max(12).nullable().optional(),
+  searchCountry: z.string().length(2).nullable().optional(),
+  preferredCountries: z.array(z.string().length(2)).max(50).optional(),
+  preferredRegions: z.array(z.string().max(32)).max(20).optional(),
+  preferredCities: z.array(z.string().max(120)).max(30).optional(),
+  internationalSearchEnabled: z.boolean().optional(),
+  /** Empty = unstated; ["SAME"] = own country only; ["*"] = anywhere; else a list. */
+  remoteEligibleCountries: z.array(z.string().max(4)).max(50).optional(),
+  relocationWillingness: z.enum(["NONE", "DOMESTIC", "INTERNATIONAL"]).optional(),
 });
 
 export async function GET() {
@@ -30,6 +49,14 @@ export async function GET() {
       yearsExp: u.yearsExp, salaryTarget: u.salaryTarget, availability: u.availability,
       skills: u.skills, openToOffers: u.openToOffers, profileReady: u.profileReady,
       title: u.title, companyId: u.companyId, linkedinLinked: Boolean(u.linkedinSub),
+      currentCountry: u.currentCountry, currentStateProvince: u.currentStateProvince,
+      currentCity: u.currentCity, currentPostalCode: u.currentPostalCode,
+      searchCountry: u.searchCountry,
+      preferredCountries: u.preferredCountries, preferredRegions: u.preferredRegions,
+      preferredCities: u.preferredCities,
+      internationalSearchEnabled: u.internationalSearchEnabled,
+      remoteEligibleCountries: u.remoteEligibleCountries,
+      relocationWillingness: u.relocationWillingness,
     });
   } catch {
     return NextResponse.json({ error: "Not signed in" }, { status: 401 });
@@ -56,6 +83,46 @@ export async function PATCH(req: Request) {
       companyId = c.id;
     }
 
+    // ── CLP-001 / CLP-002 ──
+    // If the candidate typed a location but never picked a country, resolve it
+    // rather than leaving them country-unknown, which fails closed under
+    // GEO-006 and would empty their deck without explanation.
+    const geoPatch: Record<string, unknown> = {};
+    if (rest.currentCountry) {
+      const cc = toCountryCode(rest.currentCountry);
+      geoPatch.currentCountry = cc === UNKNOWN_COUNTRY ? null : cc;
+    } else if (rest.location && !user.currentCountry) {
+      const r = resolveLocation(rest.location);
+      if (r.country !== UNKNOWN_COUNTRY) {
+        geoPatch.currentCountry = r.country;
+        geoPatch.currentStateProvince = rest.currentStateProvince ?? r.stateProvince;
+        geoPatch.currentCity = rest.currentCity ?? r.city;
+      }
+    }
+    // A postal code the candidate supplies is normalised or dropped. A
+    // malformed one is worse than none: it would place them confidently in the
+    // wrong town. Never required, and never a matching input — see postal.ts.
+    if (rest.currentPostalCode !== undefined) {
+      const cc = (geoPatch.currentCountry as string) ?? user.currentCountry ?? "US";
+      geoPatch.currentPostalCode = rest.currentPostalCode
+        ? normalisePostalCode(rest.currentPostalCode, cc)
+        : null;
+    }
+    if (rest.searchCountry !== undefined) {
+      const sc = rest.searchCountry ? toCountryCode(rest.searchCountry) : null;
+      geoPatch.searchCountry = sc === UNKNOWN_COUNTRY ? null : sc;
+    }
+    if (rest.preferredCountries) {
+      geoPatch.preferredCountries = rest.preferredCountries
+        .map(toCountryCode)
+        .filter((c) => c !== UNKNOWN_COUNTRY);
+    }
+    if (rest.remoteEligibleCountries) {
+      geoPatch.remoteEligibleCountries = rest.remoteEligibleCountries
+        .map((c) => (c === "*" || c === "SAME" ? c : toCountryCode(c)))
+        .filter((c) => c !== UNKNOWN_COUNTRY);
+    }
+
     const nextSkills = skills ? normalizeSkills(skills) : undefined;
     const merged = {
       headline: rest.headline ?? user.headline,
@@ -68,6 +135,7 @@ export async function PATCH(req: Request) {
       .update(users)
       .set({
         ...rest,
+        ...geoPatch,
         ...(nextSkills ? { skills: nextSkills } : {}),
         ...(companyId ? { companyId } : {}),
         profileReady: ready,

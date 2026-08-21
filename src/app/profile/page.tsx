@@ -24,6 +24,15 @@ export default async function ProfilePage() {
         skills: user.skills,
         openToOffers: user.openToOffers,
         title: user.title ?? "",
+        // FSD v1.1 §36.2 — CandidateLocation
+        currentCountry: user.currentCountry,
+        currentPostalCode: user.currentPostalCode,
+        searchCountry: user.searchCountry,
+        preferredCountries: user.preferredCountries,
+        preferredRegions: user.preferredRegions,
+        internationalSearchEnabled: user.internationalSearchEnabled,
+        remoteEligibleCountries: user.remoteEligibleCountries,
+        relocationWillingness: user.relocationWillingness,
       }}
       linkedinLinked={Boolean(user.linkedinSub)}
       linkedinAvailable={env.linkedin.enabled}

@@ -20,6 +20,7 @@ export default async function OnboardingPage() {
         availability: user.availability ?? "",
         bio: user.bio ?? "",
         skills: user.skills,
+        currentCountry: user.currentCountry,
       }}
       linkedinLinked={Boolean(user.linkedinSub)}
     />

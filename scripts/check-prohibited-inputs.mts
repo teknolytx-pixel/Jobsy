@@ -17,7 +17,7 @@
  * an exception. It is to move the feature out of the matching path.
  */
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
 const ROOT = new URL("..", import.meta.url).pathname;
@@ -100,6 +100,15 @@ const PROHIBITED: Rule[] = [
     why: "Illinois HB 3773 expressly bans ZIP code as a proxy for a protected class.",
   },
   {
+    label: "geographic eligibility layer",
+    patterns: [/from\s+["'].*\/geo(\/|["'])/, /from\s+["']@\/lib\/geo/, /checkGeoEligibility/, /\bdistanceMiles\b/, /\bcentroid\b/],
+    why:
+      "FSD v1.1 §38.2 — geography is a Stage 1 eligibility question, not a scoring input. " +
+      "Precise location is a documented proxy for race and socioeconomic status, so the " +
+      "engine must not be able to read it. Radius arithmetic belongs in src/lib/geo, which " +
+      "the deck calls before scoring.",
+  },
+  {
     label: "EEO self-identification store",
     patterns: [/\beeoSelfId\b/, /\beeo_self_id\b/],
     why:
@@ -180,8 +189,35 @@ function checkInputSurface(): string[] {
   return errors;
 }
 
+/**
+ * FSD v1.1 §38.2, the other direction.
+ *
+ * Keeping geography out of the engine is only half the boundary. If the
+ * eligibility layer started importing the engine, the two would fuse and the
+ * separation would exist only in the comments.
+ */
+function checkGeoIsolation(): string[] {
+  const errors: string[] = [];
+  const geoDir = join(ROOT, "src", "lib", "geo");
+  if (!existsSync(geoDir)) return errors;
+  for (const file of walk(geoDir)) {
+    const src = readFileSync(file, "utf8");
+    for (const [i, line] of src.split("\n").entries()) {
+      if (COMMENT_LINE.test(line)) continue;
+      if (/from\s+["'].*matching\//.test(line) || /from\s+["']@\/lib\/matching/.test(line)) {
+        errors.push(
+          `${relative(ROOT, file)}:${i + 1} imports the matching engine. The eligibility ` +
+            "layer decides WHICH pairs are considered; the engine decides how strong a " +
+            "considered pair is. Fusing them re-creates the problem MATCH-030 exists to stop."
+        );
+      }
+    }
+  }
+  return errors;
+}
+
 const violations = scan();
-const surfaceErrors = checkInputSurface();
+const surfaceErrors = [...checkInputSurface(), ...checkGeoIsolation()];
 
 if (violations.length === 0 && surfaceErrors.length === 0) {
   console.log("✓ MATCH-030: no prohibited inputs reachable from the matching engine");

@@ -215,7 +215,11 @@ For each of `DATABASE_URL`, `AUTH_SECRET`, `CRON_SECRET`:
 
 1. Click the **⋯** next to it → **Edit**.
 2. Paste the new value from your note.
-3. Make sure **Production**, **Preview** and **Development** are all ticked.
+3. Tick **Production** and **Preview**. Leave **Development** UNticked.
+   Vercel blocks Sensitive variables from Development on purpose: a Sensitive
+   value is write-only and cannot be read back, so `vercel env pull` could never
+   fetch it. You keep your local values in your own `.env` file, so you do not
+   need Development. Production is what the live site reads.
 4. **Save**.
 
 ### Step 17 — Add the new required variable

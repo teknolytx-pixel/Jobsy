@@ -10,6 +10,16 @@ import { screenForScam } from "@/lib/trust";
 import { clientIp, consume, tooMany } from "@/lib/ratelimit";
 import { audit, safeDetail } from "@/lib/audit";
 import { canPostForCompany } from "@/lib/company";
+import {
+  REMOTE_SCOPES,
+  checkZipState,
+  normalisePostalCode,
+  resolveLocation,
+  stateForUsZip,
+  toCountryCode,
+  UNKNOWN_COUNTRY,
+} from "@/lib/geo";
+import { dedupeKey } from "@/lib/dedupe";
 
 const Body = z.object({
   title: z.string().min(2),
@@ -38,6 +48,30 @@ const Body = z.object({
    * right of action; California prohibits referring to nonexistent jobs. This
    * checkbox is the affirmative defence, so it is required, not optional.
    */
+  // ── FSD v1.1 §36.1 — JobLocation ──
+  // Country is required for a role posted in-app. RMT-005's conservative
+  // default exists for INGESTED jobs, where nobody is present to ask; when a
+  // recruiter is sitting at the form, asking is strictly better than defaulting.
+  countryCode: z.string().length(2),
+  stateProvince: z.string().max(64).nullable().optional(),
+  city: z.string().max(120).nullable().optional(),
+  /**
+   * The identity component. Optional, because plenty of legitimate postings do
+   * not carry one, but strongly preferred: with it, the same role arriving from
+   * three job boards collapses to one card instead of three.
+   */
+  postalCode: z.string().max(12).nullable().optional(),
+  /** RMT-004 — required when the role is remote. */
+  remoteScope: z.enum(["SAME_COUNTRY", "COUNTRIES", "STATES", "REGION", "WORLDWIDE"]).nullable().optional(),
+  remoteScopeCountries: z.array(z.string().length(2)).max(50).optional(),
+  remoteScopeStates: z.array(z.string().max(64)).max(60).optional(),
+  remoteScopeRegion: z.string().max(32).nullable().optional(),
+  localOnly: z.boolean().optional(),
+  localRadiusMiles: z.number().int().min(1).max(500).nullable().optional(),
+  localJustification: z.string().max(500).nullable().optional(),
+  relocationAccepted: z.boolean().optional(),
+  allowedCountries: z.array(z.string().length(2)).max(50).optional(),
+  excludedCountries: z.array(z.string().length(2)).max(50).optional(),
   attestCurrentVacancy: z.literal(true, {
     message:
       "Please confirm this is a current, open vacancy that you're authorized to advertise.",
@@ -186,6 +220,104 @@ export async function POST(req: Request) {
 
     const skills = b.skills?.length ? normalizeSkills(b.skills) : extractSkills(b.description);
 
+    // ── FSD v1.1 §30 — resolve and validate the work location ──
+    const country = toCountryCode(b.countryCode);
+    if (country === UNKNOWN_COUNTRY) {
+      return NextResponse.json(
+        {
+          error:
+            "We do not recognise that country code. Use a two-letter ISO code, for example US, GB or IN.",
+          code: "UNKNOWN_COUNTRY",
+        },
+        { status: 400 }
+      );
+    }
+
+    // RMT-004 — a remote role posted in-app must state its geographic scope.
+    // BR-017: absent a scope we would have to fall back to RMT-005, and
+    // defaulting when the person who knows the answer is right here is a choice
+    // to be wrong later.
+    if (b.remote === "REMOTE" && !b.remoteScope) {
+      return NextResponse.json(
+        {
+          error:
+            "Tell us where this remote role can be performed from. Remote does not mean worldwide, and candidates who cannot lawfully take the role should not be shown it.",
+          code: "REMOTE_SCOPE_REQUIRED",
+        },
+        { status: 400 }
+      );
+    }
+    if (b.remoteScope && !REMOTE_SCOPES.includes(b.remoteScope)) {
+      return NextResponse.json(
+        { error: "Unrecognised remote scope.", code: "BAD_REMOTE_SCOPE" },
+        { status: 400 }
+      );
+    }
+    if (b.remoteScope === "COUNTRIES" && !(b.remoteScopeCountries ?? []).length) {
+      return NextResponse.json(
+        { error: "List the countries this remote role is open to.", code: "REMOTE_SCOPE_EMPTY" },
+        { status: 400 }
+      );
+    }
+    if (b.remoteScope === "STATES" && !(b.remoteScopeStates ?? []).length) {
+      return NextResponse.json(
+        { error: "List the states this remote role is open to.", code: "REMOTE_SCOPE_EMPTY" },
+        { status: 400 }
+      );
+    }
+    if (b.remoteScope === "REGION" && !b.remoteScopeRegion) {
+      return NextResponse.json(
+        { error: "Name the region this remote role is open to.", code: "REMOTE_SCOPE_EMPTY" },
+        { status: 400 }
+      );
+    }
+
+    // LOC-006 — a local-only requirement needs a recorded reason. Cheap to
+    // collect now; expensive to reconstruct if the pattern is ever challenged,
+    // because a radius around a workplace is a geographic screen. FSD §38.3.
+    if (b.localOnly && !(b.localJustification ?? "").trim()) {
+      return NextResponse.json(
+        {
+          error:
+            "Say why this role needs candidates to be local. A geographic restriction has to be job-related, and we record the reason with the posting.",
+          code: "LOCAL_JUSTIFICATION_REQUIRED",
+        },
+        { status: 400 }
+      );
+    }
+
+    const parsedLocation = resolveLocation(b.location);
+    const city = (b.city ?? parsedLocation.city) || null;
+
+    // The postal code may come from the form or out of the location string —
+    // "Austin, TX 78701" is what half of all feeds look like.
+    const rawPostal = b.postalCode ?? parsedLocation.postalCode;
+    const postalCode = normalisePostalCode(rawPostal, country);
+    if (rawPostal && !postalCode) {
+      return NextResponse.json(
+        {
+          error: `That does not look like a valid postal code for ${country}.`,
+          code: "BAD_POSTAL_CODE",
+        },
+        { status: 400 }
+      );
+    }
+
+    // A US ZIP names its own state, so we can both fill the state in and catch
+    // the common paste error where the ZIP belongs to a different posting.
+    let stateProvince = (b.stateProvince ?? parsedLocation.stateProvince) || null;
+    if (!stateProvince && country === "US") stateProvince = stateForUsZip(postalCode);
+
+    if (checkZipState(postalCode, stateProvince, country) === "MISMATCH") {
+      return NextResponse.json(
+        {
+          error: `The postal code ${postalCode} is in ${stateForUsZip(postalCode)}, not ${stateProvince}. Check which is right — we will not guess, because this decides who sees the posting.`,
+          code: "ZIP_STATE_MISMATCH",
+        },
+        { status: 400 }
+      );
+    }
+
     const [job] = await db
       .insert(jobs)
       .values({
@@ -209,6 +341,36 @@ export async function POST(req: Request) {
         applyMethod: b.applyMethod,
         applyUrl: b.applyUrl ?? null,
         sponsorshipAvailable: b.sponsorshipAvailable ?? null,
+
+        // ── FSD v1.1 §36.1 ──
+        countryCode: country,
+        stateProvince,
+        city,
+        postalCode,
+        remoteScope: b.remote === "REMOTE" ? (b.remoteScope ?? null) : null,
+        remoteScopeCountries: (b.remoteScopeCountries ?? []).map(toCountryCode),
+        remoteScopeStates: b.remoteScopeStates ?? [],
+        remoteScopeRegion: b.remoteScopeRegion ?? null,
+        // The employer answered, so record that rather than letting a later
+        // reader assume RMT-005 supplied it.
+        remoteScopeSource: b.remote === "REMOTE" ? "EMPLOYER" : null,
+        localOnly: Boolean(b.localOnly),
+        localRadiusMiles: b.localRadiusMiles ?? null,
+        localJustification: b.localJustification ?? null,
+        relocationAccepted: Boolean(b.relocationAccepted),
+        allowedCountries: (b.allowedCountries ?? []).map(toCountryCode),
+        excludedCountries: (b.excludedCountries ?? []).map(toCountryCode),
+        origin: "JOBSY_CREATED",
+        dedupeKey: dedupeKey({
+          title: b.title,
+          companyName: b.companyName,
+          location: b.location,
+          countryCode: country,
+          stateProvince,
+          postalCode,
+          city,
+        }),
+
         postedById: user.id,
         attestedAt: new Date(),
         attestedById: user.id,

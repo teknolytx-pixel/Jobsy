@@ -15,6 +15,20 @@
       "when": 1787147705526,
       "tag": "0001_young_zodiak",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787285842016,
+      "tag": "0002_chilly_whistler",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787287645667,
+      "tag": "0003_redundant_celestials",
+      "breakpoints": true
     }
   ]
 }

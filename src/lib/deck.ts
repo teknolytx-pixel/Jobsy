@@ -10,6 +10,7 @@ import {
   type User,
 } from "@/db";
 import { scoreJobForCandidate } from "./match";
+import { checkGeoEligibility, toCandidateGeo, toJobGeo } from "./geo";
 
 export type JobCard = {
   id: string; title: string; company: string; location: string; remote: string;
@@ -54,7 +55,11 @@ export async function candidateDeck(candidate: User): Promise<JobCard[]> {
   ]);
   const seenIds = seen.map((s) => s.jobId);
 
-  const clauses = [eq(jobs.active, true)];
+  const clauses = [
+    eq(jobs.active, true),
+    // SRC-007 — a posting that lost the canonical contest is never surfaced.
+    sql`${jobs.canonicalJobId} IS NULL`,
+  ];
   if (seenIds.length) clauses.push(notInArray(jobs.id, seenIds));
   if (blocked.length) {
     clauses.push(
@@ -62,6 +67,7 @@ export async function candidateDeck(candidate: User): Promise<JobCard[]> {
     );
   }
   const where = and(...clauses);
+  const candGeo = toCandidateGeo(candidate);
 
   const rows = await db
     .select({ job: jobs, company: companies, posterName: users.name })
@@ -75,8 +81,10 @@ export async function candidateDeck(candidate: User): Promise<JobCard[]> {
   return rows
     .map(({ job, company, posterName }) => {
       const fit = scoreJobForCandidate(job, candidate);
+      const geo = checkGeoEligibility(toJobGeo(job), candGeo);
       return {
         _excluded: fit.full.excluded,
+        _geoEligible: geo.eligible,
         id: job.id,
         title: job.title,
         company: company.name,
@@ -108,7 +116,11 @@ export async function candidateDeck(candidate: User): Promise<JobCard[]> {
     // in another city is noise in a remote-only candidate's deck, however good
     // the skill overlap looks.
     .filter((c) => !c._excluded)
-    .map(({ _excluded, ...card }) => card satisfies JobCard)
+    // BR-018 — geographic incompatibility removes the pair from the pool. This
+    // runs on the row, not on the score, because Stage 1 of FSD §34 is the
+    // eligibility layer and the scoring engine never sees geography.
+    .filter((c) => c._geoEligible)
+    .map(({ _excluded, _geoEligible, ...card }) => card satisfies JobCard)
     // XPLAIN-003 AC-3/5 — an opted-out candidate still sees the same jobs. What
     // changes is the ORDER: newest first instead of score-ranked. Withholding
     // the product because someone exercised a statutory right is retaliation,
@@ -134,6 +146,7 @@ export async function recruiterDeck(recruiter: User, jobId: string): Promise<Can
     blockedIdsFor(recruiter.id),
   ]);
   const exclude = [...new Set([...seen.map((s) => s.candidateId), recruiter.id, ...blocked])];
+  const jobGeo = toJobGeo(job);
 
   const rows = await db
     .select()
@@ -158,8 +171,10 @@ export async function recruiterDeck(recruiter: User, jobId: string): Promise<Can
   return rows
     .map((c) => {
       const fit = scoreJobForCandidate(job, c);
+      const geo = checkGeoEligibility(jobGeo, toCandidateGeo(c));
       return {
         _excluded: fit.full.excluded,
+        _geoEligible: geo.eligible,
         id: c.id,
         name: c.name,
         headline: c.headline ?? "Candidate",
@@ -182,7 +197,51 @@ export async function recruiterDeck(recruiter: User, jobId: string): Promise<Can
       };
     })
     .filter((c) => !c._excluded)
-    .map(({ _excluded, ...card }) => card satisfies CandidateCard)
+    // BR-016 / BR-018 — a candidate outside the boundary is not a weaker
+    // candidate, they are not in the pool. Skill coverage does not override it.
+    .filter((c) => c._geoEligible)
+    .map(({ _excluded, _geoEligible, ...card }) => card satisfies CandidateCard)
     .sort((a, b) => b.score - a.score)
     .slice(0, DECK_SIZE);
+}
+
+
+/**
+ * GEO-007 — why the deck is empty.
+ *
+ * An empty deck with no explanation reads as a broken product, and a candidate
+ * who has not turned international search on has no way to guess that is why.
+ * This returns the counts and the most common exclusion reason so the empty
+ * state can say something true and actionable.
+ *
+ * Every reason string comes from checkGeoEligibility, which phrases exclusions
+ * in terms of work location and never in terms of who the candidate is.
+ */
+export async function candidateGeoDiagnostics(candidate: User): Promise<{
+  considered: number;
+  excludedByGeography: number;
+  topReason: string | null;
+}> {
+  const rows = await db
+    .select({ job: jobs })
+    .from(jobs)
+    .where(and(eq(jobs.active, true), sql`${jobs.canonicalJobId} IS NULL`))
+    .orderBy(desc(jobs.postedAt))
+    .limit(POOL);
+
+  const candGeo = toCandidateGeo(candidate);
+  const reasons = new Map<string, number>();
+  let excluded = 0;
+
+  for (const { job } of rows) {
+    const verdict = checkGeoEligibility(toJobGeo(job), candGeo);
+    if (verdict.eligible) continue;
+    excluded++;
+    reasons.set(verdict.reason, (reasons.get(verdict.reason) ?? 0) + 1);
+  }
+
+  const topReason =
+    [...reasons.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+
+  return { considered: rows.length, excludedByGeography: excluded, topReason };
 }

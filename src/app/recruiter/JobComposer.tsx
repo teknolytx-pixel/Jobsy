@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 import { Sheet } from "@/components/ui";
+// Import the country list directly rather than through @/lib/geo, so the
+// centroid table used for radius maths never reaches the client bundle.
+import { COUNTRIES, REGIONS, US_STATES } from "@/lib/geo/countries";
 
 export default function JobComposer({
   onClose,
@@ -34,6 +37,20 @@ export default function JobComposer({
     benefits: "",
     /** WORK-002 — three states. "" means unstated, and is never inferred. */
     sponsorship: "" as "" | "YES" | "NO",
+
+    // ── FSD v1.1 §36.1 — JobLocation ──
+    countryCode: "US",
+    /** Identity: country + state + postal is what makes two postings one. */
+    postalCode: "",
+    /** RMT-004 — required when the role is remote. Blank is not a valid answer. */
+    remoteScope: "" as "" | "SAME_COUNTRY" | "COUNTRIES" | "STATES" | "REGION" | "WORLDWIDE",
+    remoteScopeCountries: "",
+    remoteScopeStates: "",
+    remoteScopeRegion: "NORTH_AMERICA",
+    localOnly: false,
+    localRadiusMiles: "50",
+    localJustification: "",
+    relocationAccepted: false,
   });
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -45,6 +62,16 @@ export default function JobComposer({
     // lands next to the control the recruiter has to act on.
     if (!f.attest) {
       setErr("Please confirm this is a current, open vacancy that you're authorized to advertise.");
+      return;
+    }
+    // RMT-004 / BR-017 — refuse to guess. "Remote" is not a location.
+    if (f.remote === "REMOTE" && !f.remoteScope) {
+      setErr("Where can this remote role be performed from? Remote does not mean worldwide.");
+      return;
+    }
+    // LOC-006 — see FSD §38.3. A radius is a geographic screen.
+    if (f.localOnly && !f.localJustification.trim()) {
+      setErr("Say why this role needs local candidates. We record the reason with the posting.");
       return;
     }
     setBusy(true);
@@ -68,6 +95,18 @@ export default function JobComposer({
         benefitsDescription: f.benefits.trim() || null,
         employeeCount: f.employeeCount ? Number(f.employeeCount) : null,
         sponsorshipAvailable: f.sponsorship === "" ? null : f.sponsorship === "YES",
+        countryCode: f.countryCode,
+        postalCode: f.postalCode.trim() || null,
+        remoteScope: f.remote === "REMOTE" ? f.remoteScope : null,
+        remoteScopeCountries: f.remoteScopeCountries
+          .split(",").map((x) => x.trim().toUpperCase()).filter(Boolean),
+        remoteScopeStates: f.remoteScopeStates
+          .split(",").map((x) => x.trim().toUpperCase()).filter(Boolean),
+        remoteScopeRegion: f.remoteScope === "REGION" ? f.remoteScopeRegion : null,
+        localOnly: f.localOnly,
+        localRadiusMiles: f.localOnly && f.localRadiusMiles ? Number(f.localRadiusMiles) : null,
+        localJustification: f.localOnly ? f.localJustification.trim() : null,
+        relocationAccepted: f.relocationAccepted,
       }),
     });
     const data = await res.json();
@@ -99,6 +138,34 @@ export default function JobComposer({
             <input value={f.location} onChange={(e) => set("location", e.target.value)} required placeholder="Austin, TX" />
           </label>
         </div>
+
+        <label className="field">
+          <span>Postal / ZIP code — optional</span>
+          <input
+            value={f.postalCode}
+            onChange={(e) => set("postalCode", e.target.value)}
+            placeholder="78701"
+            inputMode="text"
+          />
+          <small style={{ color: "var(--dim)", fontSize: 12 }}>
+            Used to identify the workplace, so the same role coming from several job
+            boards shows up once instead of three times. It is never used to filter
+            candidates.
+          </small>
+        </label>
+
+        <label className="field">
+          <span>Country the work happens in</span>
+          <select value={f.countryCode} onChange={(e) => set("countryCode", e.target.value)} required>
+            {Object.entries(COUNTRIES).map(([code, name]) => (
+              <option key={code} value={code}>{name}</option>
+            ))}
+          </select>
+          <small style={{ color: "var(--dim)", fontSize: 12 }}>
+            Candidates see roles in their own country by default, so this decides who this
+            posting reaches.
+          </small>
+        </label>
 
         <div className="two">
           <label className="field">
@@ -166,6 +233,120 @@ export default function JobComposer({
               placeholder="https://www.linkedin.com/jobs/view/…"
             />
           </label>
+        ) : null}
+
+        {f.remote === "REMOTE" ? (
+          <>
+            <label className="field">
+              <span>Where can this remote role be performed from?</span>
+              <select
+                value={f.remoteScope}
+                onChange={(e) => set("remoteScope", e.target.value as typeof f.remoteScope)}
+                required
+              >
+                <option value="">Choose one…</option>
+                <option value="SAME_COUNTRY">{COUNTRIES[f.countryCode] ?? "This country"} only</option>
+                <option value="STATES">Specific states or provinces</option>
+                <option value="COUNTRIES">Specific countries</option>
+                <option value="REGION">A region</option>
+                <option value="WORLDWIDE">Anywhere in the world</option>
+              </select>
+              <small style={{ color: "var(--dim)", fontSize: 12 }}>
+                Remote is not the same as worldwide. Picking &ldquo;anywhere&rdquo; means you will
+                see candidates who need authorisation you may not sponsor.
+              </small>
+            </label>
+
+            {f.remoteScope === "COUNTRIES" ? (
+              <label className="field">
+                <span>Which countries? Two-letter codes, comma separated</span>
+                <input
+                  value={f.remoteScopeCountries}
+                  onChange={(e) => set("remoteScopeCountries", e.target.value)}
+                  placeholder="US, CA, MX"
+                />
+              </label>
+            ) : null}
+
+            {f.remoteScope === "STATES" ? (
+              <label className="field">
+                <span>Which states or provinces? Comma separated</span>
+                <input
+                  value={f.remoteScopeStates}
+                  onChange={(e) => set("remoteScopeStates", e.target.value)}
+                  placeholder={`TX, ${Object.keys(US_STATES).slice(4, 6).join(", ")}`}
+                />
+              </label>
+            ) : null}
+
+            {f.remoteScope === "REGION" ? (
+              <label className="field">
+                <span>Which region?</span>
+                <select
+                  value={f.remoteScopeRegion}
+                  onChange={(e) => set("remoteScopeRegion", e.target.value)}
+                >
+                  {Object.keys(REGIONS).map((r) => (
+                    <option key={r} value={r}>{r.replace(/_/g, " ")}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+          </>
+        ) : null}
+
+        {/* ── LOC-001 – LOC-006 — the local-candidate boundary ── */}
+        <label
+          htmlFor="local-only"
+          style={{
+            display: "flex", alignItems: "flex-start", gap: 10, margin: "4px 0 10px",
+            padding: "12px 14px", border: "1px solid var(--line, #e6e8f0)", borderRadius: 12,
+            cursor: "pointer", color: "var(--txt)", fontSize: 13.5, lineHeight: 1.5,
+          }}
+        >
+          <input
+            id="local-only"
+            type="checkbox"
+            checked={f.localOnly}
+            onChange={(e) => set("localOnly", e.target.checked)}
+            style={{ marginTop: 2, width: 18, height: 18, flexShrink: 0 }}
+          />
+          <span>
+            Local candidates only
+            <br />
+            <small style={{ color: "var(--dim)" }}>
+              A hard filter. Candidates outside the boundary will not see this role, however
+              well their skills match.
+            </small>
+          </span>
+        </label>
+
+        {f.localOnly ? (
+          <>
+            <label className="field">
+              <span>Radius in miles</span>
+              <input
+                type="number"
+                min={1}
+                max={500}
+                value={f.localRadiusMiles}
+                onChange={(e) => set("localRadiusMiles", e.target.value)}
+              />
+            </label>
+            <label className="field">
+              <span>Why does this role need local candidates?</span>
+              <textarea
+                value={f.localJustification}
+                onChange={(e) => set("localJustification", e.target.value)}
+                placeholder="On-site lab work three days a week; equipment cannot leave the building."
+              />
+              <small style={{ color: "var(--dim)", fontSize: 12 }}>
+                A radius drawn around a workplace is a geographic screen, and those can exclude
+                a whole community without anyone intending it. We store your reason with the
+                posting so the requirement can be shown to be job-related.
+              </small>
+            </label>
+          </>
         ) : null}
 
         <label className="field">
