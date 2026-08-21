@@ -84,26 +84,32 @@ const FIXTURES: Record<string, unknown> = {
       },
     ],
   },
+  // v5 envelope: results moved from `data` (array) to `data.jobs`, and
+  // job_salary_currency was dropped entirely. Both are pinned by tests below.
   "jsearch.p.rapidapi.com": {
-    data: [
-      {
-        job_id: "gfj-777",
-        job_title: "Machine Learning Engineer",
-        employer_name: "Beacon Health",
-        job_publisher: "Indeed",
-        job_employment_type: "FULLTIME",
-        job_apply_link: "https://www.indeed.com/viewjob?jk=777",
-        job_description: "Take PyTorch models to production with MLOps on AWS. Python required.",
-        job_is_remote: true,
-        job_posted_at_datetime_utc: "2026-08-13T00:00:00Z",
-        job_city: "Boston",
-        job_state: "MA",
-        job_min_salary: 85,
-        job_max_salary: 110,
-        job_salary_period: "HOUR",
-        job_salary_currency: "USD",
-      },
-    ],
+    data: {
+      cursor: "next-page-token",
+      jobs: [
+        {
+          job_id: "gfj-777",
+          job_title: "Machine Learning Engineer",
+          employer_name: "Beacon Health",
+          job_publisher: "Indeed",
+          job_employment_type: "FULLTIME",
+          job_apply_link: "https://www.indeed.com/viewjob?jk=777",
+          job_description: "Take PyTorch models to production with MLOps on AWS. Python required.",
+          job_is_remote: true,
+          job_posted_at_datetime_utc: "2026-08-13T00:00:00Z",
+          job_city: "Boston",
+          job_state: "MA",
+          job_country: "US",
+          job_location: "Boston, MA",
+          job_min_salary: 85,
+          job_max_salary: 110,
+          job_salary_period: "HOUR",
+        },
+      ],
+    },
   },
   "jooble.org": {
     jobs: [
@@ -241,6 +247,60 @@ const js = await ALL_PROVIDERS.find((p) => p.source === "JSEARCH")!.fetchBoard("
 check("JSearch annualises hourly pay", js[0].salaryMin === 177 && js[0].salaryMax === 229, `$${js[0].salaryMin}k–$${js[0].salaryMax}k`);
 check("JSearch keeps the true publisher", js[0].publisher === "Indeed", js[0].publisher ?? "none");
 check("JSearch honours is_remote", js[0].remote === "REMOTE", js[0].remote);
+
+// ── The v5 contract change (found in production, Aug 2026) ──
+//
+// The API renamed /search to /search-v2 and moved results from `data` to
+// `data.jobs` with no version bump on the host. The fixture above is now the
+// v5 shape, so this assertion is what proves we read the new envelope at all.
+check("JSearch reads the v5 data.jobs envelope", js.length === 1, `${js.length} jobs`);
+
+// v5 also dropped job_salary_currency. The previous code read
+// `job_salary_currency ?? "USD"`, which with the field gone would stamp USD on
+// every posting on earth — a £45,000 London role displayed as $45,000.
+check("JSearch derives currency from the country, not a default",
+  js[0].currency === "USD", js[0].currency);
+{
+  const { jsearchProvider } = await import("../src/lib/providers/aggregators");
+  const orig = globalThis.fetch;
+  const gbFixture = {
+    data: {
+      jobs: [
+        {
+          job_id: "gfj-gb-1", job_title: "Data Engineer", employer_name: "Thames Analytics",
+          job_apply_link: "https://example.com/1", job_description: "SQL and dbt.",
+          job_city: "London", job_country: "GB",
+          job_min_salary: 60000, job_max_salary: 80000, job_salary_period: "YEAR",
+        },
+      ],
+    },
+  };
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify(gbFixture), { status: 200 })) as typeof fetch;
+  const gb = await jsearchProvider.fetchBoard("data engineer in united kingdom");
+  globalThis.fetch = orig;
+  check("JSearch stamps GBP on a UK posting", gb[0].currency === "GBP", gb[0].currency);
+  check("JSearch keeps the UK location", gb[0].location === "London", gb[0].location);
+}
+
+// An unrecognised envelope must throw, not return []. A provider that quietly
+// yields zero jobs is indistinguishable from one with no results, and that is
+// how a broken integration survives a month unnoticed — which is exactly what
+// happened here.
+{
+  const { jsearchProvider } = await import("../src/lib/providers/aggregators");
+  const orig = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ status: "OK", results: [] }), { status: 200 })) as typeof fetch;
+  let threw = false;
+  try {
+    await jsearchProvider.fetchBoard("q");
+  } catch (e) {
+    threw = /unexpected response envelope/i.test((e as Error).message);
+  }
+  globalThis.fetch = orig;
+  check("JSearch fails loudly on an unknown envelope", threw);
+}
 
 const gh = await ALL_PROVIDERS.find((p) => p.source === "GREENHOUSE")!.fetchBoard("acme");
 check("Greenhouse un-escapes + strips HTML", !gh[0].description.includes("&lt;") && !gh[0].description.includes("<p>"), gh[0].description.slice(0, 60));

@@ -45,8 +45,37 @@ type JSearchJob = {
   job_min_salary?: number;
   job_max_salary?: number;
   job_salary_period?: string;
+  /** v1 only. v5 dropped it — see currencyFor(). */
   job_salary_currency?: string;
+  /** v5. A ready-made "City, ST" string; useful when city/state are empty. */
+  job_location?: string;
 };
+
+/**
+ * v5 removed `job_salary_currency` while keeping the salary numbers.
+ *
+ * The old code read `job_salary_currency ?? "USD"`, so with the field gone
+ * every posting on earth would be stored as US dollars — a £45,000 London role
+ * shown to a candidate as $45,000, which is not a rounding error but a
+ * different job. Currency is therefore derived from the country the work is in,
+ * and an unknown country yields USD only because the corpus is majority-US and
+ * something has to be picked; that is a documented guess, not a fact.
+ */
+const CURRENCY_BY_COUNTRY: Record<string, string> = {
+  US: "USD", CA: "CAD", GB: "GBP", IE: "EUR", DE: "EUR", FR: "EUR", ES: "EUR",
+  PT: "EUR", IT: "EUR", NL: "EUR", BE: "EUR", AT: "EUR", FI: "EUR", GR: "EUR",
+  CH: "CHF", SE: "SEK", NO: "NOK", DK: "DKK", PL: "PLN", CZ: "CZK", RO: "RON",
+  IN: "INR", SG: "SGD", AU: "AUD", NZ: "NZD", JP: "JPY", KR: "KRW", CN: "CNY",
+  HK: "HKD", PH: "PHP", ID: "IDR", MY: "MYR", VN: "VND", TH: "THB", AE: "AED",
+  SA: "SAR", IL: "ILS", TR: "TRY", EG: "EGP", ZA: "ZAR", NG: "NGN", KE: "KES",
+  BR: "BRL", AR: "ARS", CL: "CLP", CO: "COP", PE: "PEN", MX: "MXN",
+};
+
+function currencyFor(job: JSearchJob): string {
+  if (job.job_salary_currency) return job.job_salary_currency;
+  const cc = (job.job_country ?? "").trim().toUpperCase();
+  return CURRENCY_BY_COUNTRY[cc] ?? "USD";
+}
 
 const JSEARCH_QUERIES = [
   "software engineer in usa",
@@ -77,7 +106,13 @@ export const jsearchProvider: JobProvider = {
   boards: () => demandQueries("PHRASE", JSEARCH_QUERIES, queriesPerRun(env.jobs.jsearchMonthlyBudget)),
 
   async fetchBoard(query: string): Promise<NormalizedJob[]> {
-    const url = `https://jsearch.p.rapidapi.com/search?query=${encodeURIComponent(query)}&page=1&num_pages=1&date_posted=month`;
+    // v5 of this API renamed /search to /search-v2 and moved the results from
+    // `data` (an array) to `data.jobs`. Both changes shipped without a version
+    // bump on the host, so the old path simply started returning
+    // {"message":"Endpoint '/search' does not exist"} — a 404 that reads like a
+    // network fault rather than a contract change. Hence the explicit check on
+    // the envelope below: a silent zero is worse than a loud failure.
+    const url = `https://jsearch.p.rapidapi.com/search-v2?query=${encodeURIComponent(query)}&page=1&num_pages=1&date_posted=month`;
     const res = await fetch(url, {
       headers: {
         "X-RapidAPI-Key": env.jobs.rapidApiKey!,
@@ -87,12 +122,36 @@ export const jsearchProvider: JobProvider = {
     });
     if (!res.ok) throw new Error(`JSearch "${query}" → HTTP ${res.status}`);
 
-    const data = (await res.json()) as { data?: JSearchJob[] };
+    const body = (await res.json()) as {
+      data?: JSearchJob[] | { jobs?: JSearchJob[]; cursor?: string };
+    };
 
-    return (data.data ?? []).map((j): NormalizedJob => {
+    // Accept both shapes so a future flip back does not silently ingest nothing.
+    const rows: JSearchJob[] = Array.isArray(body.data)
+      ? body.data
+      : (body.data?.jobs ?? []);
+
+    // An unrecognised envelope must fail, not return []. A provider that
+    // quietly yields zero jobs looks identical to a provider with no results,
+    // and that is how a broken integration survives for a month unnoticed.
+    if (!Array.isArray(body.data) && !Array.isArray(body.data?.jobs)) {
+      throw new Error(
+        `JSearch "${query}" → unexpected response envelope; keys: ${Object.keys(body).join(", ")}`
+      );
+    }
+
+    return rows.map((j): NormalizedJob => {
       const description = stripHtml(j.job_description ?? "");
+      // v5 supplies a ready-made job_location; prefer the structured parts when
+      // present, fall back to it, and only then to the bare country. The old
+      // final fallback of "United States" is gone: asserting a country the
+      // payload never claimed is exactly the kind of guess the geo layer is
+      // built to refuse (GEO-006).
       const location =
-        [j.job_city, j.job_state].filter(Boolean).join(", ") || j.job_country || "United States";
+        [j.job_city, j.job_state].filter(Boolean).join(", ") ||
+        j.job_location?.trim() ||
+        j.job_country ||
+        "";
       const [min, max] = annualiseToK(j.job_min_salary, j.job_max_salary, j.job_salary_period);
 
       return {
@@ -111,7 +170,7 @@ export const jsearchProvider: JobProvider = {
         seniority: inferSeniority(j.job_title, description),
         salaryMin: min,
         salaryMax: max,
-        currency: j.job_salary_currency ?? "USD",
+        currency: currencyFor(j),
         description: description.slice(0, 6000),
         skills: extractSkills(description),
         perks: j.job_publisher ? [`via ${j.job_publisher}`] : [],
