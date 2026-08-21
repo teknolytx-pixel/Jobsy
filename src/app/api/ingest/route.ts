@@ -92,8 +92,16 @@ async function runIngest() {
   const started = Date.now();
   const deadline = started + BUDGET_MS;
 
-  // 1. targeted — every job each connected employer currently has posted
-  const companies = await syncAllSources();
+  // 1. targeted — every job each connected employer currently has posted.
+  //
+  //    Capped at a share of the budget, not the whole of it. This phase runs
+  //    first, so left uncapped a long enough company list starves discovery
+  //    completely and nothing else in this function ever executes.
+  const {
+    results: companies,
+    skipped: skippedSources,
+    truncated: sourcesTruncated,
+  } = await syncAllSources({ deadline: started + Math.round(BUDGET_MS * 0.55) });
   // 2. broad — query-based discovery across the aggregators, bounded by the
   //    clock and rotating least-recently-run boards first.
   const { runs, skipped, truncated } = await ingestAll({ deadline });
@@ -129,6 +137,8 @@ async function runIngest() {
       failing: companies.filter((c) => c.error).length,
       results: companies,
       totals: sum(companies),
+      truncated: sourcesTruncated,
+      skipped: skippedSources,
     },
     discovery: {
       providers: activeProviders().map((p) => p.source),

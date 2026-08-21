@@ -197,20 +197,58 @@ export async function syncSource(src: JobSourceRow): Promise<SyncResult> {
 }
 
 /** Sync every enabled connected company. Oldest-synced first. */
-export async function syncAllSources(limit = 200): Promise<SyncResult[]> {
+/** Headroom reserved for one more source before the deadline. */
+export const PER_SOURCE_RESERVE_MS = 9_000;
+
+export type SyncAllResult = {
+  results: SyncResult[];
+  /** Sources the clock ran out on. They sort first next time. */
+  skipped: { id: string; companyName: string }[];
+  truncated: boolean;
+};
+
+/**
+ * SRC-015, second half.
+ *
+ * This loop had the same unbounded shape as ingestAll, and fixing only the
+ * discovery half left the bug in place: this runs FIRST, so with enough
+ * connected companies it consumed the whole function ceiling before discovery
+ * got a single millisecond — and the response was still empty, because the
+ * function was still killed. A partial fix to a timeout is not a fix; it just
+ * moves which half of the work disappears.
+ *
+ * The ordering (least-recently-run first, nulls first) was already right, so
+ * deferring the tail is safe: those sources lead the next run.
+ */
+export async function syncAllSources(
+  opts: { limit?: number; deadline?: number } = {}
+): Promise<SyncAllResult> {
   const rows = await db
     .select()
     .from(jobSources)
     .where(eq(jobSources.enabled, true))
     .orderBy(asc(sql`${jobSources.lastRunAt} nulls first`))
-    .limit(limit);
+    .limit(opts.limit ?? 200);
 
   const results: SyncResult[] = [];
+  const skipped: { id: string; companyName: string }[] = [];
+
   for (const r of rows) {
+    if (opts.deadline && Date.now() + PER_SOURCE_RESERVE_MS > opts.deadline) {
+      skipped.push({ id: r.id, companyName: r.companyName });
+      continue;
+    }
     results.push(await syncSource(r));
     await new Promise((res) => setTimeout(res, 250)); // be a polite client
   }
-  return results;
+
+  if (skipped.length) {
+    console.warn(
+      `[sources] out of time — ${skipped.length} source(s) deferred: ` +
+        skipped.map((s) => s.companyName).join(", ")
+    );
+  }
+  return { results, skipped, truncated: skipped.length > 0 };
 }
 
 /** Sources that have never run, or last ran before the cutoff. */
