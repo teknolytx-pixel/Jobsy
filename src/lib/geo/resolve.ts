@@ -15,6 +15,7 @@
 
 import { extractPostalCode, normalisePostalCode, stateForUsZip } from "./postal";
 import {
+  COUNTRIES,
   UNKNOWN_COUNTRY,
   toCountryCode,
   toUsStateAbbr,
@@ -108,6 +109,106 @@ const INFERABLE_CITIES: Record<string, CountryCode> = {
   //   Portland (OR / ME), Washington (DC / state), Arlington (VA / TX).
 };
 
+/**
+ * Airport-style and colloquial city abbreviations.
+ *
+ * Real feeds are full of "SF, NYC, SEA, CHI". Consulted only AFTER the country
+ * and state checks have failed, so a token like "SD" is still read as South
+ * Dakota (which resolves to the US anyway) rather than San Diego.
+ */
+const CITY_ABBREV: Record<string, { city: string; country: CountryCode }> = {
+  sf: { city: "San Francisco", country: "US" },
+  sfo: { city: "San Francisco", country: "US" },
+  nyc: { city: "New York", country: "US" },
+  ny: { city: "New York", country: "US" },
+  lax: { city: "Los Angeles", country: "US" },
+  chi: { city: "Chicago", country: "US" },
+  chicago: { city: "Chicago", country: "US" },
+  sea: { city: "Seattle", country: "US" },
+  atl: { city: "Atlanta", country: "US" },
+  bos: { city: "Boston", country: "US" },
+  phl: { city: "Philadelphia", country: "US" },
+  phx: { city: "Phoenix", country: "US" },
+  dfw: { city: "Dallas", country: "US" },
+  pdx: { city: "Portland", country: "US" },
+  den: { city: "Denver", country: "US" },
+  aus: { city: "Austin", country: "US" },
+  hou: { city: "Houston", country: "US" },
+  msp: { city: "Minneapolis", country: "US" },
+  ldn: { city: "London", country: "GB" },
+  lon: { city: "London", country: "GB" },
+  blr: { city: "Bengaluru", country: "IN" },
+  hyd: { city: "Hyderabad", country: "IN" },
+  bom: { city: "Mumbai", country: "IN" },
+  yyz: { city: "Toronto", country: "CA" },
+  yvr: { city: "Vancouver", country: "CA" },
+  ber: { city: "Berlin", country: "DE" },
+  ams: { city: "Amsterdam", country: "NL" },
+  syd: { city: "Sydney", country: "AU" },
+};
+
+/**
+ * ATS country-prefix notation: "US-New York", "CA-Toronto", "GB-London".
+ *
+ * Greenhouse and Lever emit this constantly, and it is the single largest
+ * cause of unresolved locations in a real corpus. The prefix IS the country,
+ * so this converts a total failure into a high-confidence answer.
+ */
+function stripCountryPrefix(part: string): { country: CountryCode | null; rest: string } {
+  const m = part.match(/^\s*([A-Za-z]{2})\s*[-–—]\s*(.+)$/);
+  if (!m) return { country: null, rest: part };
+
+  const token = m[1];
+  const rest = m[2].trim();
+  const code = toCountryCode(token);
+  if (code === UNKNOWN_COUNTRY) return { country: null, rest: part };
+
+  // "CA-" is both California and Canada. Let the city decide, exactly as it
+  // does for "San Francisco, CA" vs "Berlin, DE": CA-Toronto is Canada,
+  // CA-San Francisco is California. With no recognisable city, follow the ATS
+  // convention, where the prefix is an ISO country code.
+  if (token.length === 2 && isUsState(token) && code !== "US") {
+    const byCity = INFERABLE_CITIES[norm(rest)] ?? CITY_ABBREV[norm(rest)]?.country;
+    if (byCity) return { country: byCity, rest };
+  }
+  return { country: code, rest };
+}
+
+/**
+ * Locations listed as alternatives rather than as one place.
+ *
+ * Real postings use every separator anyone has ever thought of: "London OR
+ * Dublin", "Chicago and NYC", "New York/ San Francisco", "Berlin & Munich".
+ */
+function splitAlternatives(text: string): string[] {
+  return text
+    .split(/\s+\b(?:or|and)\b\s+|\s*[;|/&+]\s*/i)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Last resort: a country named inside a sentence rather than as a field.
+ *
+ * "Remote in the US", "Work from anywhere in Canada". Only full country names
+ * and a few unmistakable abbreviations are matched, on word boundaries, so
+ * "Indiana" never becomes India and "Chilean" never becomes Chile.
+ */
+function countryFromPhrase(text: string): CountryCode {
+  if (/\b(?:the\s+)?u\.?s\.?a?\.?\b/i.test(text) && /\b(?:the\s+us(?:a)?|u\.s\.a?\.?|usa)\b/i.test(text)) {
+    return "US";
+  }
+  if (/\bthe\s+u\.?k\.?\b/i.test(text)) return "GB";
+
+  const lower = text.toLowerCase();
+  const hits = new Set<CountryCode>();
+  for (const [code, name] of Object.entries(COUNTRIES)) {
+    const escaped = name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`\\b${escaped}\\b`).test(lower)) hits.add(code);
+  }
+  return hits.size === 1 ? [...hits][0] : UNKNOWN_COUNTRY;
+}
+
 const norm = (s: string) => s.trim().toLowerCase().replace(/\./g, "").replace(/\s+/g, " ");
 
 /**
@@ -134,7 +235,7 @@ export function resolveLocation(input: string | null | undefined): ResolvedLocat
     };
   }
 
-  const parts = text
+  let parts = text
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
@@ -143,6 +244,43 @@ export function resolveLocation(input: string | null | undefined): ResolvedLocat
   let confidence: ResolvedLocation["confidence"] = "UNKNOWN";
   let stateProvince: string | null = null;
   let city: string | null = null;
+
+  // A postal code glued to a state ("TX 78701") would stop the state matching
+  // below from recognising "TX". The code itself is recovered from the original
+  // string in step 5, so nothing is lost by removing it here.
+  for (let i = 0; i < parts.length; i++) {
+    parts[i] = parts[i]
+      .replace(/\s*\b\d{5}(?:-\d{4})?\b\s*/g, " ")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+  }
+  parts = parts.filter(Boolean);
+
+  // ── 0. ATS country prefixes: "US-New York, US-Chicago" ──
+  //
+  // Applied per part, because a multi-city posting repeats the prefix on every
+  // one. If the parts disagree about the country the posting spans borders, and
+  // we say UNKNOWN rather than picking a winner.
+  const prefixCountries = new Set<CountryCode>();
+  for (let i = 0; i < parts.length; i++) {
+    const { country: pc, rest } = stripCountryPrefix(parts[i]);
+    if (!pc) continue;
+    prefixCountries.add(pc);
+    parts[i] = rest;
+  }
+  if (prefixCountries.size === 1) {
+    country = [...prefixCountries][0];
+    confidence = "EXPLICIT";
+  } else if (prefixCountries.size > 1) {
+    return {
+      country: UNKNOWN_COUNTRY,
+      stateProvince: null,
+      city: null,
+      postalCode: null,
+      confidence: "UNKNOWN",
+      mentionsRemote,
+    };
+  }
 
   // ── 1. An UNAMBIGUOUS country, usually last. ──
   //
@@ -164,7 +302,12 @@ export function resolveLocation(input: string | null | undefined): ResolvedLocat
   }
 
   // ── 2. A state or province, which implies its own country. ──
-  for (let i = parts.length - 1; i >= 0; i--) {
+  //
+  // Skipped for a multi-city posting. "US-San Francisco, US-Chicago, US-New
+  // York" is three cities in one country, and reading "New York" as THE state
+  // of the posting would be worse than leaving it blank.
+  const multiPlace = prefixCountries.size === 1 && parts.length > 1;
+  for (let i = parts.length - 1; !multiPlace && i >= 0; i--) {
     const token = parts[i];
     const us = toUsStateAbbr(token);
     if (us && (country === "US" || country === UNKNOWN_COUNTRY)) {
@@ -191,7 +334,8 @@ export function resolveLocation(input: string | null | undefined): ResolvedLocat
     }
   }
 
-  // ── 3. Whatever remains is the city. ──
+  // ── 3. Whatever remains is the city. For a multi-city posting we keep the
+  // first as a label; the country is what the eligibility layer acts on. ──
   if (parts.length) city = parts[0];
 
   // ── 3b. Let the city arbitrate an ambiguous two-letter token. ──
@@ -213,6 +357,54 @@ export function resolveLocation(input: string | null | undefined): ResolvedLocat
     const guess = INFERABLE_CITIES[norm(city)];
     if (guess) {
       country = guess;
+      confidence = "INFERRED";
+    } else {
+      const abbrev = CITY_ABBREV[norm(city)];
+      if (abbrev) {
+        country = abbrev.country;
+        city = abbrev.city;
+        confidence = "INFERRED";
+      }
+    }
+  }
+
+  // ── 4b. A list of alternatives that all sit in one country. ──
+  //
+  // "SF, NYC, SEA, CHI" is four cities and one country. Parsing it as
+  // city/state/country produces nothing, so fall back to reading each part as
+  // a place in its own right. Only agreement counts: if the parts span
+  // countries the posting genuinely spans borders, and UNKNOWN is the honest
+  // answer.
+  if (country === UNKNOWN_COUNTRY) {
+    const candidates = [
+      ...splitAlternatives(text),
+      ...text.split(",").map((s) => s.trim()),
+    ].filter(Boolean);
+
+    const found = new Set<CountryCode>();
+    let firstCity: string | null = null;
+    for (const cand of candidates) {
+      if (norm(cand) === norm(text)) continue; // avoid infinite regress
+      const sub = resolveLocation(cand);
+      if (sub.country === UNKNOWN_COUNTRY) continue;
+      found.add(sub.country);
+      if (!firstCity) firstCity = sub.city;
+    }
+    if (found.size === 1) {
+      country = [...found][0];
+      city = firstCity;
+      stateProvince = null;
+      confidence = "INFERRED";
+    }
+  }
+
+  // ── 4c. A country named inside a sentence: "Remote in the US". ──
+  if (country === UNKNOWN_COUNTRY) {
+    const phrase = countryFromPhrase(original);
+    if (phrase !== UNKNOWN_COUNTRY) {
+      country = phrase;
+      city = null;
+      stateProvince = null;
       confidence = "INFERRED";
     }
   }
