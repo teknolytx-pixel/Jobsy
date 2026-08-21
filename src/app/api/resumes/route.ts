@@ -29,7 +29,37 @@ export async function GET() {
     .where(and(eq(resumes.userId, me.id), isNull(resumes.deletedAt)))
     .orderBy(desc(resumes.version));
 
+  /**
+   * The pending suggestion, if there is one.
+   *
+   * Until now the parse result was returned exactly once, in the response to
+   * the upload itself. Reload the page and it was gone — the candidate had
+   * uploaded a CV, been shown what we read out of it, and lost the chance to
+   * approve any of it. Re-reading it here is what makes the review a step you
+   * can come back to rather than a modal you had to catch.
+   */
+  const primary = rows.find((r) => r.isPrimary);
+  let suggestion: unknown = null;
+  if (primary) {
+    const [p] = await db
+      .select()
+      .from(resumeParses)
+      .where(eq(resumeParses.resumeId, primary.id))
+      .orderBy(desc(resumeParses.createdAt))
+      .limit(1);
+    // An applied parse is spent. Offering it again would invite a candidate to
+    // overwrite edits they made by hand afterwards.
+    if (p && !p.appliedToProfile) {
+      suggestion = {
+        resumeId: primary.id,
+        parsed: p.structured,
+        confidence: p.confidence ?? {},
+      };
+    }
+  }
+
   return NextResponse.json({
+    suggestion,
     resumes: rows.map((r) => ({
       id: r.id,
       filename: r.filename,

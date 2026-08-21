@@ -57,6 +57,15 @@ export type AuditAction =
   | "company.member_removed"
   | "job.created"
   | "job.updated"
+  /**
+   * RESUME-003 AC-4 — a parser wrote to someone's profile.
+   *
+   * Worth its own action because it is the only path where profile content
+   * arrives from a machine reading a document rather than from the candidate
+   * typing. If someone later says "I never wrote that headline", this is the
+   * record that answers it: which fields, from which resume, on whose approval.
+   */
+  | "profile.updated_from_resume"
   // ADM-003 / NFR-004 — application events were entirely absent from the audit
   // log. Account, company and job changes were recorded; the thing candidates
   // most often ask about was not.

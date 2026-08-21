@@ -249,7 +249,17 @@ function parseRoles(lines: string[]): ParsedRole[] {
       const endRaw = range?.[2] ?? null;
       const isCurrent = Boolean(endRaw && /present|current|now/i.test(endRaw));
       current = {
-        ...splitTitleAndCompany(line.replace(YEAR_RANGE_RE, "").replace(/[|,·–—-]\s*$/, "").trim()),
+        ...splitTitleAndCompany(
+          line
+            .replace(YEAR_RANGE_RE, "")
+            // Removing "2021 - Present" from "Senior Engineer (2021 - Present)"
+            // leaves "Senior Engineer ()". The brackets held the dates and are
+            // now empty, so they go too — otherwise every title parsed from the
+            // most common header format carries a stray "()" into the profile.
+            .replace(/[([{]\s*[)\]}]/g, "")
+            .replace(/[|,·–—-]\s*$/, "")
+            .trim()
+        ),
         period: range?.[0] ?? null,
         startYear: range ? Number(range[1]) : null,
         // AC-5 — "Present" resolves against today, so total experience is
@@ -263,9 +273,22 @@ function parseRoles(lines: string[]): ParsedRole[] {
 
     if (current && isBullet) {
       current.bullets.push(line.replace(/^[•·▪◦*\-–—]\s+/, "").trim());
-    } else if (current && current.bullets.length === 0 && line.length < 120 && !current.company) {
-      // A continuation line right after the header is usually the company.
+    } else if (current && current.bullets.length === 0 && !current.company && looksLikeCompany(line)) {
+      // A continuation line right after the header is SOMETIMES the company.
       current.company = line;
+    } else if (current) {
+      /**
+       * An unmarked line under a role is an achievement, not rubbish.
+       *
+       * This branch did not exist, and everything that reached it was silently
+       * dropped. That matters more than it sounds: Word keeps list formatting
+       * in numbering.xml rather than in the text, so bullet points exported
+       * from Word usually arrive as plain paragraphs with no •, -, or * in
+       * them at all. For those CVs — a large share of real ones — every
+       * achievement under every job was discarded, and the resume builder
+       * rendered job titles with nothing underneath them.
+       */
+      current.bullets.push(line);
     }
   }
   if (current) roles.push(current);
@@ -280,9 +303,54 @@ function looksLikeRoleHeader(line: string): boolean {
   );
 }
 
+/**
+ * Is this continuation line the employer, or the first achievement?
+ *
+ * The old code assumed employer, always. That is right for the two-line layout
+ * ("Senior Engineer" / "Fintech Co") and wrong for the far more common one
+ * where the header already names the company and the next line is a bullet —
+ * in which case the first thing the candidate actually did got filed as their
+ * employer's name.
+ *
+ * A company name is short, and it is not a sentence.
+ */
+function looksLikeCompany(line: string): boolean {
+  if (line.length > 60) return false;
+  if (/[.!?]$/.test(line)) return false;
+  // Past-tense openers are how achievement bullets start, with or without a
+  // bullet character in front of them.
+  if (
+    /^(built|led|ran|owned|managed|designed|shipped|drove|grew|reduced|improved|created|launched|delivered|developed|worked|wrote|migrated|implemented|maintained|architected|scaled|automated|refactored|supported|coordinated|analy[sz]ed|organised|organized|collaborated|partnered|responsible)\b/i.test(
+      line
+    )
+  ) {
+    return false;
+  }
+  return true;
+}
+
 function splitTitleAndCompany(s: string): { title: string | null; company: string | null } {
   const parts = s.split(/\s+(?:at|@|[|·–—])\s+/).map((p) => p.trim()).filter(Boolean);
   if (parts.length >= 2) return { title: parts[0]!, company: parts[1]! };
+
+  /**
+   * "Senior Engineer, Fintech Co" — the single most common role-header format
+   * in the world, and the separator list above did not include a comma.
+   *
+   * It cannot be split blindly: plenty of titles contain a comma of their own
+   * ("Engineer, Payments Platform"). So the split only happens on the LAST
+   * comma, and only when what follows reads like an organisation rather than
+   * more of the title — short, and not starting lowercase.
+   */
+  const comma = s.lastIndexOf(",");
+  if (comma > 0) {
+    const left = s.slice(0, comma).trim();
+    const right = s.slice(comma + 1).trim();
+    if (left && right && right.length <= 45 && /^[A-Z0-9]/.test(right)) {
+      return { title: left, company: right };
+    }
+  }
+
   return { title: s || null, company: null };
 }
 
@@ -447,9 +515,15 @@ export function toProfilePatch(
   const patch: Record<string, unknown> = {};
   const ok = (field: string) => approved.includes(field);
 
-  if (ok("headline") && parsed.headline) patch.headline = parsed.headline.slice(0, 200);
-  if (ok("summary") && parsed.summary) patch.bio = parsed.summary.slice(0, 5000);
-  if (ok("skills") && parsed.skills.length) patch.skills = parsed.skills.slice(0, 50);
+  // These caps must match PATCH /api/profile exactly, and until now they did
+  // not: headline was clipped at 200 against the profile's 140, bio at 5000
+  // against 2000, skills at 50 against 40. Nothing caught it because nothing
+  // ever called this function — the moment a candidate approved a long headline
+  // the profile write would have failed validation with an error naming a field
+  // they never typed into.
+  if (ok("headline") && parsed.headline) patch.headline = parsed.headline.slice(0, 140);
+  if (ok("summary") && parsed.summary) patch.bio = parsed.summary.slice(0, 2000);
+  if (ok("skills") && parsed.skills.length) patch.skills = parsed.skills.slice(0, 40);
   if (ok("totalYearsExperience") && parsed.totalYearsExperience != null) {
     patch.yearsExp = parsed.totalYearsExperience;
   }

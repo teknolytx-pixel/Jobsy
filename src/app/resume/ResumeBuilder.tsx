@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Icon, Logo } from "@/components/Icon";
+import ResumeUpload from "./ResumeUpload";
 
 /**
  * The resume screen.
@@ -71,8 +72,16 @@ export default function ResumeBuilder() {
   const [polishing, setPolishing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const load = useCallback(async (id: string, polish = false) => {
-    polish ? setPolishing(true) : setBusy(true);
+  /**
+   * `quiet` refreshes the document in place.
+   *
+   * The uploader below used to sit inside the block gated on `!busy`, so every
+   * refresh unmounted it — the candidate pressed Apply, the panel vanished
+   * mid-action, and the confirmation they were meant to read went with it.
+   * The uploader now renders unconditionally and asks for a quiet reload.
+   */
+  const load = useCallback(async (id: string, polish = false, quiet = false) => {
+    polish ? setPolishing(true) : quiet ? null : setBusy(true);
     setErr(null);
     try {
       const qs = new URLSearchParams();
@@ -331,6 +340,16 @@ export default function ResumeBuilder() {
             ) : null}
           </>
         ) : null}
+
+        {/*
+          RESUME-001 — the upload surface.
+          OUTSIDE the block above, deliberately. Everything above unmounts while
+          the document reloads; this must not, because it owns an in-progress
+          action and the message confirming it. It asks for a quiet reload so an
+          approved headline or a newly-read work history appears in the resume
+          without the page appearing to restart underneath the person using it.
+        */}
+        <ResumeUpload onChanged={() => void load(jobId, false, true)} />
       </div>
     </div>
   );

@@ -464,6 +464,88 @@ await t("TC-RESUME-003-18", "nothing is applied to the profile without approval"
   assert.ok(patch.skills, "an approved field is included");
   assert.equal(patch.headline, undefined, "an unapproved field is not");
 });
+/**
+ * Real-CV shapes that the parser got wrong until the upload screen existed to
+ * put a real CV through it. Every one of these produced a visibly broken
+ * profile suggestion, and none was caught because nothing could reach the
+ * parser from the product.
+ */
+const WORD_CV = [
+  "Jane Q Candidate",
+  "SUMMARY",
+  "Backend engineer focused on payments infrastructure.",
+  "EXPERIENCE",
+  "Senior Engineer, Fintech Co (2021 - Present)",
+  "Built the double-entry ledger service in Python on PostgreSQL",
+  "Ran the on-call rotation for six services",
+  "Engineer, Payments Ltd (2018 - 2021)",
+  "Wrote the reconciliation pipeline",
+].join("\n");
+
+await t("TC-RESUME-003-23", "a comma splits title from company", () => {
+  const r = parseResume(WORD_CV).parsed.roles[0]!;
+  assert.equal(r.title, "Senior Engineer", `title was "${r.title}"`);
+  assert.equal(r.company, "Fintech Co", `company was "${r.company}"`);
+});
+await t("TC-RESUME-003-24", "stripping the dates does not leave empty brackets", () => {
+  const r = parseResume(WORD_CV).parsed.roles[0]!;
+  assert.ok(!/[()]/.test(r.title ?? ""), `title kept brackets: "${r.title}"`);
+});
+await t("TC-RESUME-003-25", "unmarked achievement lines are kept as bullets", () => {
+  // Word stores list formatting in numbering.xml, not in the text, so bullets
+  // exported from Word usually have no •, - or * in front of them. These used
+  // to be dropped on the floor.
+  const r = parseResume(WORD_CV).parsed.roles[0]!;
+  assert.equal(r.bullets.length, 2, `bullets: ${JSON.stringify(r.bullets)}`);
+  assert.ok(r.bullets[0]!.startsWith("Built the double-entry"));
+});
+await t("TC-RESUME-003-26", "an achievement is never mistaken for the employer", () => {
+  const roles = parseResume(WORD_CV).parsed.roles;
+  for (const r of roles) {
+    assert.ok(
+      !/^(Built|Ran|Wrote)\b/.test(r.company ?? ""),
+      `an achievement became the company: "${r.company}"`
+    );
+  }
+});
+await t("TC-RESUME-003-27", "the two-line layout still finds the employer", () => {
+  // Regression guard on the fix above: when the header does NOT name the
+  // company, the short line under it is still the company, not a bullet.
+  const r = parseResume(
+    "EXPERIENCE\nSenior Engineer\nFintech Co\nBuilt the ledger service\n"
+  ).parsed.roles[0]!;
+  assert.equal(r.company, "Fintech Co", `company was "${r.company}"`);
+  assert.equal(r.bullets.length, 1, `bullets: ${JSON.stringify(r.bullets)}`);
+});
+await t("TC-RESUME-003-28", "the derived headline is readable", () => {
+  assert.equal(parseResume(WORD_CV).parsed.headline, "Senior Engineer at Fintech Co");
+});
+
+/**
+ * The caps here must match PATCH /api/profile, or approving a field produces a
+ * write the profile API rejects — with a validation error naming a field the
+ * candidate never typed into. Nothing caught this for weeks because nothing
+ * called `toProfilePatch` at all; the apply endpoint is its first caller.
+ */
+await t("TC-RESUME-003-20", "the patch respects the profile's own field limits", () => {
+  const long = parseResume(
+    `Jane Doe\n${"Staff Engineer and platform lead ".repeat(20)}\n\nSUMMARY\n${"x".repeat(6000)}\n`
+  );
+  const patch = toProfilePatch(long, ["headline", "summary"]);
+  assert.ok((patch.headline?.length ?? 0) <= 140, `headline ${patch.headline?.length} > 140`);
+  assert.ok((patch.bio?.length ?? 0) <= 2000, `bio ${patch.bio?.length} > 2000`);
+});
+await t("TC-RESUME-003-21", "skills are capped at what the profile accepts", () => {
+  const many = parseResume(`Jane Doe\n\nSKILLS\n${Array.from({ length: 80 }, (_, i) => `Skill${i}`).join(", ")}\n`);
+  const patch = toProfilePatch(many, ["skills"]);
+  assert.ok((patch.skills?.length ?? 0) <= 40, `skills ${patch.skills?.length} > 40`);
+});
+await t("TC-RESUME-003-22", "an unknown field name cannot smuggle a value through", () => {
+  // The apply endpoint validates against a fixed enum, but the function must
+  // hold on its own — it is the thing that decides what reaches the profile.
+  const patch = toProfilePatch(parsed, ["role", "isPlatformAdmin", "email"]);
+  assert.deepEqual(patch, {}, "only the four known fields are ever emitted");
+});
 await t("TC-RESUME-003-19", "an empty resume does not throw", () => {
   const empty = parseResume("");
   assert.equal(empty.parsed.roles.length, 0);

@@ -12,7 +12,10 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   viewportFit: "cover",
-  themeColor: "#0d0f16",
+  // Must track --bg in globals.css. This is the colour iOS and Android paint
+  // the browser chrome with, so when it drifts from the page background the
+  // top of the screen is visibly a different shade than the app under it.
+  themeColor: "#0a0d13",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
