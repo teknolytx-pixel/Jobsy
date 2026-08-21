@@ -1220,6 +1220,104 @@ await t("TC-NFR-005-01", "the scoring model is versioned", async () => {
 });
 
 // ══════════════════════════════════════════════════════════════
+G("E2E-013 · applications and recruiter filters");
+// ══════════════════════════════════════════════════════════════
+
+let appJobId = null;
+
+await t("setup", "a live role with one applicant", async () => {
+  const j = await lifeRec.post("/api/jobs", {
+    title: "Applicant Pipeline Engineer",
+    companyName: "Lifecycle Labs",
+    location: "Austin, TX",
+    countryCode: "US",
+    description: "Own the pipeline. Requirements: 5+ years with React and TypeScript.",
+    salaryMin: 150, salaryMax: 185,
+    benefitsDescription: "Health, dental and vision.",
+    attestCurrentVacancy: true,
+    applyMethod: "EASY",
+  });
+  eq(j.status, 201);
+  appJobId = j.json.jobId;
+  const sw = await seeker.post("/api/swipe", { mode: "candidate", direction: "LIKE", jobId: appJobId });
+  eq(sw.status, 200);
+});
+
+await t("TC-APP-003-01", "the recruiter can list applicants", async () => {
+  const r = await lifeRec.get(`/api/applications?jobId=${appJobId}`);
+  eq(r.status, 200);
+  ok(r.json.applications.length >= 1, `${r.json.applications.length} applicant(s)`);
+  ok(r.json.applications[0].statusLabel, "status is human-readable");
+});
+
+await t("TC-APP-003-02", "another employer cannot read them", async () => {
+  const r = await rec.get(`/api/applications?jobId=${appJobId}`);
+  ok(r.status === 403 || r.status === 401, `got ${r.status}`);
+});
+
+await t("TC-APP-003-03", "a job seeker cannot read them at all", async () => {
+  const r = await seeker.get(`/api/applications?jobId=${appJobId}`);
+  eq(r.status, 403);
+});
+
+await t("TC-APP-004-01", "status moves and is recorded", async () => {
+  const list = await lifeRec.get(`/api/applications?jobId=${appJobId}`);
+  const appId = list.json.applications[0].id;
+  const r = await lifeRec.patch(`/api/applications/${appId}`, { status: "VIEWED" });
+  eq(r.status, 200);
+  eq(r.json.changed, true);
+
+  const after = await lifeRec.get(`/api/applications?jobId=${appJobId}`);
+  eq(after.json.applications[0].status, "VIEWED", "the candidate can finally see it moved");
+});
+
+await t("TC-APP-004-02", "an illegal transition is refused", async () => {
+  const list = await lifeRec.get(`/api/applications?jobId=${appJobId}`);
+  const appId = list.json.applications[0].id;
+  const r = await lifeRec.patch(`/api/applications/${appId}`, { status: "SUBMITTED" });
+  eq(r.status, 400, "an application cannot be un-viewed");
+  eq(r.json.code, "ILLEGAL_TRANSITION");
+});
+
+await t("TC-BR-011-04", "rejecting an application needs a job-related reason", async () => {
+  const list = await lifeRec.get(`/api/applications?jobId=${appJobId}`);
+  const appId = list.json.applications[0].id;
+  const r = await lifeRec.patch(`/api/applications/${appId}`, { status: "REJECTED" });
+  eq(r.status, 400);
+  eq(r.json.code, "REJECTION_REASON_REQUIRED");
+});
+
+await t("TC-BR-011-05", "with a reason it succeeds, and is terminal", async () => {
+  const list = await lifeRec.get(`/api/applications?jobId=${appJobId}`);
+  const appId = list.json.applications[0].id;
+  const ok1 = await lifeRec.patch(`/api/applications/${appId}`, {
+    status: "REJECTED", reason: "SKILLS_GAP",
+  });
+  eq(ok1.status, 200);
+  const reopen = await lifeRec.patch(`/api/applications/${appId}`, { status: "INTERVIEWING" });
+  eq(reopen.status, 400, "a rejection cannot be quietly reopened");
+});
+
+await t("TC-CAND-002-01", "recruiter filters narrow the deck", async () => {
+  const all = await lifeRec.get(`/api/deck?mode=recruiter&jobId=${appJobId}`);
+  eq(all.status, 200);
+  const strict = await lifeRec.get(`/api/deck?mode=recruiter&jobId=${appJobId}&minScore=99`);
+  eq(strict.status, 200);
+  ok(strict.json.cards.length <= all.json.cards.length, "a filter can only narrow");
+});
+
+await t("TC-CAND-007-01", "a protected-attribute filter is ignored, not honoured", async () => {
+  // The allowlist is the mechanism: unknown parameters are never read, so this
+  // returns the same deck rather than a filtered one.
+  const base = await lifeRec.get(`/api/deck?mode=recruiter&jobId=${appJobId}`);
+  const evil = await lifeRec.get(
+    `/api/deck?mode=recruiter&jobId=${appJobId}&maxAge=30&gender=F&citizenship=US&school=Harvard`
+  );
+  eq(evil.status, 200, "no crash, no error — simply not a filter");
+  eq(evil.json.cards.length, base.json.cards.length, "the deck is unchanged");
+});
+
+// ══════════════════════════════════════════════════════════════
 console.log(`\n${"═".repeat(60)}`);
 console.log(`${pass} passed, ${fail} failed  —  end-to-end lifecycle`);
 console.log("═".repeat(60));

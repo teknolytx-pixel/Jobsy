@@ -17,7 +17,7 @@
     "test:providers": "tsx scripts/test-providers.mts",
     "test:e2e": "SEED_PASSWORD=local-e2e-password npm run reset && SEED_PASSWORD=local-e2e-password npm run seed && SEED_PASSWORD=local-e2e-password node scripts/e2e.mjs",
     "test:sources": "tsx scripts/test-sources.mts",
-    "test": "npm run guard && npm run test:matching && npm run test:geo && npm run test:demand && npm run test:jobstatus && npm run test:authorization && npm run test:providers && npm run test:sources && npm run test:compliance && npm run test:security",
+    "test": "npm run guard && npm run test:matching && npm run test:geo && npm run test:demand && npm run test:jobstatus && npm run test:authorization && npm run test:appstatus && npm run test:providers && npm run test:sources && npm run test:compliance && npm run test:security",
     "db:migrate": "drizzle-kit migrate",
     "test:matching": "tsx scripts/test-matching.mts",
     "guard": "tsx scripts/check-prohibited-inputs.mts",
@@ -32,7 +32,8 @@
     "test:demand": "tsx scripts/test-demand.mts",
     "test:queries": "tsx scripts/test-queries.mts",
     "test:jobstatus": "tsx scripts/test-jobstatus.mts",
-    "test:authorization": "tsx scripts/test-authorization.mts"
+    "test:authorization": "tsx scripts/test-authorization.mts",
+    "test:appstatus": "tsx scripts/test-appstatus.mts"
   },
   "dependencies": {
     "bcryptjs": "3.0.3",

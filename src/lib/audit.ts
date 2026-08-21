@@ -57,6 +57,10 @@ export type AuditAction =
   | "company.member_removed"
   | "job.created"
   | "job.updated"
+  // ADM-003 / NFR-004 — application events were entirely absent from the audit
+  // log. Account, company and job changes were recorded; the thing candidates
+  // most often ask about was not.
+  | "application.status_changed"
   | "job.closed"
   | "job.attested"
   | "job.auto_expired"

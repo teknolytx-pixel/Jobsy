@@ -141,7 +141,37 @@ export async function candidateDeck(candidate: User): Promise<JobCard[]> {
     .slice(0, DECK_SIZE);
 }
 
-export async function recruiterDeck(recruiter: User, jobId: string): Promise<CandidateCard[]> {
+/**
+ * CAND-002 / CAND-007 — the filters a recruiter may apply, as a closed list.
+ *
+ * This is an allowlist and not a convenience. The spec permits filtering on
+ * skills, experience and the like; it PROHIBITS filtering on a protected
+ * characteristic. The difference between those two sentences is one careless
+ * `Object.assign(where, req.query)` away, so no filter reaches the query unless
+ * it is named here.
+ *
+ * Absent on purpose, and to be kept absent: name, age, graduation year, school,
+ * photo, gender, citizenship, sponsorship need, postcode. Sponsorship is
+ * handled as a Stage-1 eligibility rule (BR-006) precisely so it can never
+ * become a thing a recruiter dials up or down.
+ */
+export type RecruiterFilters = {
+  /** Candidate must have ALL of these. Matched against the normalised set. */
+  skills?: string[];
+  minYearsExp?: number;
+  maxYearsExp?: number;
+  /** Their stated preference: ONSITE | HYBRID | REMOTE | ANY. */
+  remotePref?: string;
+  /** Their target, in $k. A recruiter filtering by budget, not by person. */
+  maxSalaryTarget?: number;
+  minScore?: number;
+};
+
+export async function recruiterDeck(
+  recruiter: User,
+  jobId: string,
+  filters: RecruiterFilters = {}
+): Promise<CandidateCard[]> {
   const found = await db.select().from(jobs).where(eq(jobs.id, jobId)).limit(1);
   const job = found[0];
   if (!job || job.postedById !== recruiter.id) throw new Error("Not your job post");
@@ -217,6 +247,28 @@ export async function recruiterDeck(recruiter: User, jobId: string): Promise<Can
     // candidate, they are not in the pool. Skill coverage does not override it.
     .filter((c) => c._geoEligible)
     .filter((c) => c._sponsorshipEligible)
+    // CAND-002 — applied AFTER eligibility and scoring, never as SQL. Keeping
+    // them out of the query means a filter can only ever narrow what the
+    // recruiter was already permitted to see.
+    .filter((c) => {
+      if (filters.minScore !== undefined && c.score < filters.minScore) return false;
+      if (filters.minYearsExp !== undefined && (c.yearsExp ?? 0) < filters.minYearsExp) return false;
+      if (filters.maxYearsExp !== undefined && (c.yearsExp ?? 0) > filters.maxYearsExp) return false;
+      if (filters.remotePref && c.remotePref !== filters.remotePref) return false;
+      if (
+        filters.maxSalaryTarget !== undefined &&
+        c.salaryTarget !== null &&
+        c.salaryTarget !== undefined &&
+        c.salaryTarget > filters.maxSalaryTarget
+      ) {
+        return false;
+      }
+      if (filters.skills?.length) {
+        const have = new Set(c.skills.map((s) => s.toLowerCase()));
+        if (!filters.skills.every((want) => have.has(want.toLowerCase()))) return false;
+      }
+      return true;
+    })
     .map(({ _excluded, _geoEligible, _sponsorshipEligible, ...card }) => card satisfies CandidateCard)
     .sort((a, b) => b.score - a.score)
     .slice(0, DECK_SIZE);

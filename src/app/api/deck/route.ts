@@ -17,7 +17,38 @@ export async function GET(req: Request) {
       const recruiter = await requireRole("RECRUITER");
       const jobId = url.searchParams.get("jobId");
       if (!jobId) return NextResponse.json({ error: "jobId is required" }, { status: 400 });
-      return NextResponse.json({ mode, cards: await recruiterDeck(recruiter, jobId) });
+
+      /**
+       * CAND-002 / CAND-007 — parameters are READ BY NAME, one at a time.
+       *
+       * Never spread from the query string. `{...Object.fromEntries(params)}`
+       * would work, would look tidy, and would mean any future column name
+       * becomes a filter the moment someone guesses it — including the ones
+       * that must never be filterable. Anything not named here is ignored.
+       */
+      const num = (k: string) => {
+        const v = url.searchParams.get(k);
+        if (v === null || v.trim() === "") return undefined;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : undefined;
+      };
+      const skills = (url.searchParams.get("skills") ?? "")
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean)
+        .slice(0, 12);
+
+      return NextResponse.json({
+        mode,
+        cards: await recruiterDeck(recruiter, jobId, {
+          skills: skills.length ? skills : undefined,
+          minYearsExp: num("minYearsExp"),
+          maxYearsExp: num("maxYearsExp"),
+          maxSalaryTarget: num("maxSalaryTarget"),
+          minScore: num("minScore"),
+          remotePref: url.searchParams.get("remotePref") ?? undefined,
+        }),
+      });
     }
 
     if (user.role !== "CANDIDATE" && !user.isPlatformAdmin) {
