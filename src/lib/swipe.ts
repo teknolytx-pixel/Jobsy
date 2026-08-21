@@ -1,4 +1,5 @@
 import { and, eq } from "drizzle-orm";
+import { applyRefusalReason, type JobStatus } from "./jobStatus";
 import {
   applications,
   candidateSwipes,
@@ -47,6 +48,18 @@ export async function candidateSwipe(
   const row = await loadJob(jobId);
   if (!row) throw new Error("Job not found");
   const { job, company, poster } = row;
+
+  // APP-007 / BR-013 — a closed posting must refuse, not merely disappear.
+  //
+  // Before this, the ONLY thing keeping applications out of a closed role was
+  // that it stopped appearing in the deck. A direct POST /api/swipe still
+  // created an application, and the candidate got a confirmation for a job
+  // nobody was reading. A PASS is still allowed: dismissing a dead card is
+  // harmless and refusing it would strand the deck.
+  if (direction === "LIKE") {
+    const refusal = applyRefusalReason(job.status as JobStatus);
+    if (refusal) throw new Error(refusal);
+  }
 
   const fit = scoreJobForCandidate(job, candidate);
 

@@ -29,6 +29,13 @@
       "when": 1787287645667,
       "tag": "0003_redundant_celestials",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787311741770,
+      "tag": "0004_stiff_terrax",
+      "breakpoints": true
     }
   ]
 }

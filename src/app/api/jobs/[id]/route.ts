@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { canTransition, isVisible, transitionError, JOB_STATUSES, type JobStatus } from "@/lib/jobStatus";
 import { z } from "zod";
 import { and, count, eq } from "drizzle-orm";
 import { db, companies, jobs } from "@/db";
@@ -32,6 +33,13 @@ const PatchBody = z.object({
   applyUrl: z.string().url().nullable().optional(),
   sponsorshipAvailable: z.boolean().nullable().optional(),
   active: z.boolean().optional(),
+  /**
+   * FSD §8.1 — the lifecycle transition. `active` is still accepted for
+   * backwards compatibility and is treated as shorthand: true means PUBLISHED,
+   * false means CLOSED. Sending both is allowed; `status` wins, because it is
+   * the more specific statement of intent.
+   */
+  status: z.enum(JOB_STATUSES).optional(),
   /** JOB-003 / TRUST-001 — "yes, this is still open". */
   confirmStillOpen: z.boolean().optional(),
 });
@@ -127,7 +135,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
 
   // Closing needs no compliance screen — nothing is being published.
   if (b.active === false && Object.keys(b).length === 1) {
-    await db.update(jobs).set({ active: false }).where(eq(jobs.id, id));
+    await db.update(jobs).set({ active: false, status: "CLOSED" }).where(eq(jobs.id, id));
     await audit({ action: "job.closed", actorId: me.id, subjectType: "job", subjectId: id, ip });
     return NextResponse.json({ ok: true, active: false });
   }
@@ -200,6 +208,28 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
       ? extractSkills(b.description)
       : job.skills;
 
+  /**
+   * FSD §8.1 — resolve the requested lifecycle change, and refuse an illegal
+   * one rather than writing it.
+   *
+   * `active` and `status` are kept in lockstep here and nowhere else. Letting
+   * any other code write one without the other is how they drift, and a drifted
+   * pair means a posting that is invisible but still accepting applications —
+   * or worse, the reverse.
+   */
+  const requested: JobStatus | null =
+    b.status ?? (b.active === undefined ? null : b.active ? "PUBLISHED" : "CLOSED");
+
+  if (requested && !canTransition(job.status as JobStatus, requested)) {
+    return NextResponse.json(
+      { error: transitionError(job.status as JobStatus, requested), code: "ILLEGAL_TRANSITION" },
+      { status: 400 }
+    );
+  }
+
+  const nextStatus: JobStatus = requested ?? (job.status as JobStatus);
+  const statusPatch = { status: nextStatus, active: isVisible(nextStatus) };
+
   await db
     .update(jobs)
     .set({
@@ -219,7 +249,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
       applyUrl: b.applyUrl !== undefined ? b.applyUrl : job.applyUrl,
       sponsorshipAvailable:
         b.sponsorshipAvailable !== undefined ? b.sponsorshipAvailable : job.sponsorshipAvailable,
-      active: b.active ?? job.active,
+      ...statusPatch,
       lastConfirmedAt: new Date(),
       expiryWarnedAt: null,
     })
@@ -263,7 +293,7 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
 
   // AC-4 — closing, not deleting. Existing matches and threads survive, and the
   // card shows "This role has closed" rather than vanishing mid-conversation.
-  await db.update(jobs).set({ active: false }).where(eq(jobs.id, id));
+  await db.update(jobs).set({ active: false, status: "CLOSED" }).where(eq(jobs.id, id));
   await audit({
     action: "job.closed",
     actorId: me.id,

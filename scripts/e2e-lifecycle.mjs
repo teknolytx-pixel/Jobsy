@@ -43,6 +43,11 @@ function eq(a, b, msg) {
   if (a !== b) throw new Error(`${msg ?? "not equal"} — expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
 }
 
+/** For assertions where the expected value is "anything truthy". */
+function ok(v, msg) {
+  if (!v) throw new Error(msg ?? "expected a truthy value");
+}
+
 /**
  * A browser-like client: keeps cookies, sends JSON, and presents a distinct
  * source IP.
@@ -999,6 +1004,111 @@ await t("TC-CAN-001-02", "signup cannot request platform staff", async () => {
   // The proof that it was ignored: staff endpoints still refuse them.
   const admin = await impostor.get("/api/admin/compliance");
   eq(admin.status, 403, "isPlatformAdmin must not be settable by a request body");
+});
+
+// ══════════════════════════════════════════════════════════════
+G("E2E-010 · the job lifecycle");
+// ══════════════════════════════════════════════════════════════
+//
+// FSD §8.1 / APP-007 / BR-013 / AC-013. Before the status model existed a
+// closed posting only DISAPPEARED from the deck — a direct POST /api/swipe
+// still created an application, and the candidate got a confirmation email for
+// a role nobody was reading any more.
+
+let lifecycleJobId = null;
+
+// Its own recruiter, for the same reason the boundary block needed its own
+// candidate: by this point in the run `rec` has been through the suspension and
+// company-removal tests, so reusing it produces 403s that say nothing about the
+// job lifecycle.
+const lifeRec = client();
+const lifeRecEmail = emailFor("liferec");
+
+await t("setup", "recruiter signs up and verifies", async () => {
+  const r = await lifeRec.post("/api/auth/signup", {
+    email: lifeRecEmail,
+    password: "Str0ngPassw0rd!",
+    name: "Lifecycle Recruiter",
+    role: "RECRUITER",
+    location: "Austin, TX",
+    acceptedTerms: true,
+  });
+  eq(r.status, 201);
+  const mail = await lastEmailTo(lifeRecEmail, "VERIFY_EMAIL");
+  await lifeRec.get(`/api/auth/verify?token=${encodeURIComponent(tokenFrom(mail.body, "/api/auth/verify"))}`);
+});
+
+await t("setup", "recruiter publishes a role to close later", async () => {
+  const r = await lifeRec.post("/api/jobs", {
+    title: "Closing Soon Engineer",
+    companyName: "Lifecycle Labs",
+    location: "Austin, TX",
+    countryCode: "US",
+    description: "Own the analytics workspace. Requirements: 5+ years with React and TypeScript.",
+    salaryMin: 150,
+    salaryMax: 185,
+    benefitsDescription: "Health, dental and vision; 401(k) match.",
+    attestCurrentVacancy: true,
+  });
+  eq(r.status, 201);
+  lifecycleJobId = r.json.jobId;
+  ok(lifecycleJobId, "job id returned");
+});
+
+await t("TC-JS-E2E-01", "a published role accepts an application", async () => {
+  const r = await seeker.post("/api/swipe", {
+    mode: "candidate", direction: "LIKE", jobId: lifecycleJobId,
+  });
+  eq(r.status, 200, "a live role takes applications");
+});
+
+await t("TC-JS-E2E-02", "an illegal transition is refused", async () => {
+  const r = await lifeRec.patch(`/api/jobs/${lifecycleJobId}`, { status: "DRAFT" });
+  eq(r.status, 400, "published cannot go back to draft");
+  eq(r.json.code, "ILLEGAL_TRANSITION");
+});
+
+await t("TC-JS-E2E-03", "closing a role sets the status, not just the flag", async () => {
+  const r = await lifeRec.patch(`/api/jobs/${lifecycleJobId}`, { status: "CLOSED" });
+  eq(r.status, 200);
+});
+
+await t("TC-APP-007-01", "a closed role refuses a NEW application", async () => {
+  // A different candidate, so this is a genuinely new application rather than
+  // an idempotent repeat of the one made while the role was live.
+  const later = client();
+  const laterEmail = emailFor("late");
+  await later.post("/api/auth/signup", {
+    email: laterEmail, password: "Str0ngPassw0rd!", name: "Late Applicant",
+    role: "CANDIDATE", location: "Austin, TX", acceptedTerms: true,
+  });
+  const mail = await lastEmailTo(laterEmail, "VERIFY_EMAIL");
+  await later.get(`/api/auth/verify?token=${encodeURIComponent(tokenFrom(mail.body, "/api/auth/verify"))}`);
+
+  const r = await later.post("/api/swipe", {
+    mode: "candidate", direction: "LIKE", jobId: lifecycleJobId,
+  });
+  eq(r.status, 400, "BR-013 — a closed role takes nobody new");
+  ok(/closed/i.test(r.json.error ?? ""), `message names the reason: ${r.json.error}`);
+});
+
+await t("TC-APP-007-02", "passing on a closed role is still allowed", async () => {
+  const r = await seeker.post("/api/swipe", {
+    mode: "candidate", direction: "PASS", jobId: lifecycleJobId,
+  });
+  eq(r.status, 200, "dismissing a dead card must not strand the deck");
+});
+
+await t("TC-JS-E2E-04", "a closed role can be reopened", async () => {
+  const r = await lifeRec.patch(`/api/jobs/${lifecycleJobId}`, { status: "PUBLISHED" });
+  eq(r.status, 200);
+});
+
+await t("TC-JS-E2E-05", "archiving is permanent", async () => {
+  const a = await lifeRec.patch(`/api/jobs/${lifecycleJobId}`, { status: "ARCHIVED" });
+  eq(a.status, 200);
+  const back = await lifeRec.patch(`/api/jobs/${lifecycleJobId}`, { status: "PUBLISHED" });
+  eq(back.status, 400, "un-archiving would resurrect a role its applicants were told was over");
 });
 
 // ══════════════════════════════════════════════════════════════

@@ -349,7 +349,9 @@ export async function deactivateStale(olderThanHours = 72): Promise<number> {
   const cutoff = new Date(Date.now() - olderThanHours * 3600_000);
   const res = await db
     .update(jobs)
-    .set({ active: false })
+    // ARCHIVED, not CLOSED: the source stopped carrying it, so it is gone
+    // rather than deliberately closed by an employer.
+    .set({ active: false, status: "ARCHIVED" })
     .where(and(eq(jobs.active, true), ne(jobs.source, "JOBSY"), lt(jobs.syncedAt, cutoff)))
     .returning({ id: jobs.id });
   return res.length;

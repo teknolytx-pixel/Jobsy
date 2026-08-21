@@ -16,6 +16,21 @@ import {
 // ENUMS
 // ─────────────────────────────────────────────────────────────
 export const roleEnum = pgEnum("role", ["CANDIDATE", "RECRUITER", "BOTH"]);
+/**
+ * FSD §8.1 — the job lifecycle. `active` is retained and derived from this;
+ * see src/lib/jobStatus.ts for why both exist.
+ *
+ * BOTH remains in roleEnum above only because removing a Postgres enum value
+ * means recreating the type and rewriting every dependent column. Nothing
+ * writes it any more — see scripts/migrate-roles.mts.
+ */
+export const jobStatusEnum = pgEnum("job_status", [
+  "DRAFT",
+  "PUBLISHED",
+  "PAUSED",
+  "CLOSED",
+  "ARCHIVED",
+]);
 export const directionEnum = pgEnum("direction", ["LIKE", "PASS"]);
 export const applyMethodEnum = pgEnum("apply_method", ["EASY", "EXTERNAL"]);
 export const jobSourceEnum = pgEnum("job_source", [
@@ -394,7 +409,9 @@ export const jobs = pgTable(
     /** Set on a duplicate, pointing at the posting we surface instead. */
     canonicalJobId: varchar("canonical_job_id", { length: 36 }),
 
+    /** Derived from `status`. Kept so existing visibility queries are unchanged. */
     active: boolean("active").notNull().default(true),
+    status: jobStatusEnum("status").notNull().default("PUBLISHED"),
     postedAt: timestamp("posted_at", { withTimezone: true }).notNull().defaultNow(),
     syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
     raw: jsonb("raw"),
@@ -402,6 +419,7 @@ export const jobs = pgTable(
   (t) => [
     uniqueIndex("jobs_source_external_idx").on(t.source, t.externalId),
     index("jobs_active_posted_idx").on(t.active, t.postedAt),
+    index("jobs_status_idx").on(t.status),
     index("jobs_posted_by_idx").on(t.postedById),
     index("jobs_country_active_idx").on(t.countryCode, t.active),
     index("jobs_dedupe_key_idx").on(t.dedupeKey),

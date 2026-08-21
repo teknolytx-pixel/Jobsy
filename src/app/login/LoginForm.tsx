@@ -99,7 +99,11 @@ export default function LoginForm({ linkedinEnabled }: { linkedinEnabled: boolea
         </h1>
         <p style={{ color: "var(--dim)", fontSize: 13.5, margin: "0 0 4px" }}>
           {signup
-            ? "One profile works for both sides — swipe jobs and post them."
+            ? // This said "one profile works for both sides" — written when that
+              // was true, and left sitting directly above the control that now
+              // tells you the opposite. Copy that contradicts the rule on the
+              // same screen is worse than no copy.
+              "Takes a minute. Pick a side below — it decides what Jobsy shows you."
             : "Sign in to keep swiping."}
         </p>
 
