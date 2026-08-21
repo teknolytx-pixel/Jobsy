@@ -75,7 +75,21 @@ export default function LoginForm({ linkedinEnabled }: { linkedinEnabled: boolea
         // "verify your email" wall come as a surprise.
         setNotice("Check your inbox — we've sent you a link to verify your email address.");
       }
-      router.push(data.profileReady ? "/swipe" : "/onboarding");
+      /**
+       * ORG-002 — return the person to where they were going.
+       *
+       * An invitation link sends a signed-out invitee here with ?next=/join?…
+       * Without honouring it they land on a deck with no mention of the
+       * invitation they just clicked, and the token is left unused in an email
+       * they have already opened. Onboarding still wins: an unfinished profile
+       * cannot use most destinations anyway.
+       *
+       * Only same-origin PATHS are followed. Taking an absolute URL from a
+       * query parameter is an open redirect, which is a phishing primitive.
+       */
+      const raw = params.get("next");
+      const next = raw && raw.startsWith("/") && !raw.startsWith("//") ? raw : null;
+      router.push(!data.profileReady ? "/onboarding" : (next ?? "/swipe"));
       router.refresh();
     } catch {
       setErr("Network error — is the server running?");

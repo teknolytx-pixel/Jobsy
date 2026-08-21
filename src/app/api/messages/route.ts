@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { asc, eq } from "drizzle-orm";
-import { db, matches, messages, users } from "@/db";
+import { db, jobs, matches, messages, users } from "@/db";
+import { env } from "@/lib/env";
+import { newMessageTemplate, sendEmail } from "@/lib/email";
 import { requireVerifiedUser, requireUser, authErrorResponse } from "@/lib/auth";
 import { isBlocked } from "@/lib/trust";
 import { consume, tooMany } from "@/lib/ratelimit";
@@ -79,6 +81,39 @@ export async function POST(req: Request) {
       .insert(messages)
       .values({ matchId: parsed.data.matchId, senderId: user.id, body: parsed.data.body.trim() })
       .returning();
+
+    /**
+     * §17 — tell the other person. This template was written, styled and
+     * tested, and never called from anywhere: a match opened a chat and then
+     * both sides had to keep the tab open to discover a reply.
+     *
+     * Deliberately not awaited into the response path. A mail outage must not
+     * make sending a message fail — the message is already committed, and the
+     * notification is a courtesy on top of it. sendEmail() consults the
+     * recipient's preferences, so someone who has switched "new messages" off
+     * gets a SUPPRESSED log row instead of an email.
+     */
+    void (async () => {
+      try {
+        const [recipient] = await db.select().from(users).where(eq(users.id, other)).limit(1);
+        const [job] = await db.select({ title: jobs.title }).from(jobs).where(eq(jobs.id, match.jobId)).limit(1);
+        if (!recipient) return;
+        await sendEmail(
+          newMessageTemplate({
+            to: recipient.email,
+            toName: recipient.name,
+            fromName: user.name,
+            jobTitle: job?.title ?? "your match",
+            // A preview, not the message. The full text lives behind a login.
+            preview: msg.body.slice(0, 140),
+            chatUrl: `${env.appUrl}/matches/${match.id}`,
+            unsubUrl: `${env.appUrl}/settings/notifications`,
+          })
+        );
+      } catch (e) {
+        console.error("[messages] notification failed:", (e as Error).message);
+      }
+    })();
 
     return NextResponse.json({ ok: true, id: msg.id, at: msg.createdAt.toISOString() });
   } catch (e) {

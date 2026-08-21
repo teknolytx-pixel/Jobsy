@@ -1112,6 +1112,66 @@ await t("TC-JS-E2E-05", "archiving is permanent", async () => {
 });
 
 // ══════════════════════════════════════════════════════════════
+G("E2E-011 · reachability — the built-but-unreachable features");
+// ══════════════════════════════════════════════════════════════
+//
+// Each of these was a complete server-side feature with no way in. The
+// invitation flow emailed a link to a page that did not exist; the notification
+// preferences table was written at signup and never read; the new-message
+// template was defined and never called.
+
+await t("TC-ORG-002-01", "the invitation link resolves to a real page", async () => {
+  const r = await fetch(`${BASE}/join?token=whatever`, { redirect: "manual" });
+  // Signed out it redirects to login; either way it is no longer a 404.
+  ok(r.status !== 404, `GET /join returned ${r.status}`);
+});
+
+await t("TC-ORG-002-02", "the login redirect carries the invitation with it", async () => {
+  const r = await fetch(`${BASE}/join?token=abc123`, { redirect: "manual" });
+  const to = r.headers.get("location") ?? "";
+  ok(/\/login/.test(to), `redirects to login: ${to}`);
+  ok(decodeURIComponent(to).includes("/join?token=abc123"),
+    `preserves the destination: ${decodeURIComponent(to)}`);
+});
+
+await t("TC-ORG-002-03", "a bogus token is refused, not silently accepted", async () => {
+  const r = await seeker.post("/api/company/invitations/accept", { token: "not-a-real-token" });
+  eq(r.status, 400);
+});
+
+await t("TC-MATCH-006-01", "notification preferences are readable", async () => {
+  const r = await seeker.get("/api/account/notifications");
+  eq(r.status, 200);
+  eq(r.json.newMatch, true, "defaults to on");
+  eq(r.json.jobAlerts, false, "job alerts default to off — opt-in, not opt-out");
+});
+
+await t("TC-MATCH-006-02", "a preference can be switched off and reads back", async () => {
+  const w = await seeker.patch("/api/account/notifications", { newMessage: false });
+  eq(w.status, 200);
+  const r = await seeker.get("/api/account/notifications");
+  eq(r.json.newMessage, false, "the table is finally being read");
+});
+
+await t("TC-MATCH-006-03", "unsubscribe-all is recorded", async () => {
+  await seeker.patch("/api/account/notifications", { unsubscribeAll: true });
+  const r = await seeker.get("/api/account/notifications");
+  eq(r.json.unsubscribedAll, true);
+  // Put it back so later assertions about email are not affected.
+  await seeker.patch("/api/account/notifications", { unsubscribeAll: false, newMessage: true });
+});
+
+await t("TC-MATCH-006-04", "preferences need a session", async () => {
+  const r = await client().get("/api/account/notifications");
+  eq(r.status, 401);
+});
+
+await t("TC-MATCH-006-05", "the settings page exists", async () => {
+  const r = await fetch(`${BASE}/settings/notifications`, { redirect: "manual" });
+  ok(r.status !== 404, `GET /settings/notifications returned ${r.status}`);
+});
+
+// ══════════════════════════════════════════════════════════════
 console.log(`\n${"═".repeat(60)}`);
 console.log(`${pass} passed, ${fail} failed  —  end-to-end lifecycle`);
 console.log("═".repeat(60));

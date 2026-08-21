@@ -74,7 +74,20 @@ export const applicationStatusEnum = pgEnum("application_status", [
   "REJECTED",
   "HIRED",
 ]);
-export const emailStatusEnum = pgEnum("email_status", ["QUEUED", "SENT", "FAILED", "LOGGED_ONLY"]);
+/**
+ * SUPPRESSED — the recipient has this category switched off (MATCH-006).
+ *
+ * A distinct status, not a silent skip: "we chose not to send this" and "we
+ * tried and failed" are different facts, and collapsing them makes a delivery
+ * problem indistinguishable from a working preference.
+ */
+export const emailStatusEnum = pgEnum("email_status", [
+  "QUEUED",
+  "SENT",
+  "FAILED",
+  "LOGGED_ONLY",
+  "SUPPRESSED",
+]);
 export const emailTemplateEnum = pgEnum("email_template", [
   "RECRUITER_INTEREST",
   "APPLICATION_RECEIVED",

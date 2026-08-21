@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { db, emailLogs, type EmailTemplate } from "@/db";
+import { db, emailLogs, notificationPrefs, users, type EmailTemplate } from "@/db";
 import { env } from "./env";
 
 export type SendArgs = {
@@ -15,7 +15,82 @@ export type SendArgs = {
  * is fully testable with no provider key. Without RESEND_API_KEY the message is
  * written to the DB + stdout and marked LOGGED_ONLY.
  */
+/**
+ * MATCH-006 / §17 — which templates a person can switch off.
+ *
+ * The `notification_prefs` table has existed since NOTIF-001, complete with an
+ * unsubscribe token, and `sendEmail()` never once consulted it. Every email
+ * carried a "manage your preferences" link, the preferences were real rows in a
+ * real table, and nothing read them — so the link was a promise the product did
+ * not keep.
+ *
+ * TRANSACTIONAL templates are deliberately absent from this map and are always
+ * sent. Verifying an address, resetting a password, being told your password
+ * changed, or being handed a data export you asked for are not marketing: CAN-SPAM
+ * exempts transactional mail from opt-out, and suppressing a security notice
+ * because someone unticked a box is how an account takeover goes unnoticed.
+ */
+const PREF_FOR_TEMPLATE: Partial<Record<EmailTemplate, keyof typeof PREF_COLUMNS>> = {
+  MATCH_CANDIDATE: "newMatch",
+  MATCH_RECRUITER: "newMatch",
+  NEW_MESSAGE: "newMessage",
+  RECRUITER_INTEREST: "recruiterInterest",
+  APPLICATION_RECEIVED: "applicationStatus",
+  JOB_EXPIRY_WARNING: "productUpdates",
+  SOURCE_DISABLED: "productUpdates",
+};
+
+const PREF_COLUMNS = {
+  newMatch: notificationPrefs.newMatch,
+  newMessage: notificationPrefs.newMessage,
+  recruiterInterest: notificationPrefs.recruiterInterest,
+  applicationStatus: notificationPrefs.applicationStatus,
+  jobAlerts: notificationPrefs.jobAlerts,
+  productUpdates: notificationPrefs.productUpdates,
+} as const;
+
+/**
+ * True when this address has switched this category off, or unsubscribed from
+ * everything. Unknown addresses are allowed through: absence of a preference
+ * row is not consent withdrawn, and refusing to email people we have no row for
+ * would silently break signup.
+ */
+async function suppressedFor(to: string, template: EmailTemplate): Promise<boolean> {
+  const key = PREF_FOR_TEMPLATE[template];
+  if (!key) return false; // transactional — always sent
+
+  const rows = await db
+    .select({
+      allowed: PREF_COLUMNS[key],
+      suppressedAt: notificationPrefs.suppressedAt,
+    })
+    .from(notificationPrefs)
+    .innerJoin(users, eq(users.id, notificationPrefs.userId))
+    .where(eq(users.email, to.toLowerCase()))
+    .limit(1);
+
+  const row = rows[0];
+  if (!row) return false;
+  return Boolean(row.suppressedAt) || row.allowed === false;
+}
+
 export async function sendEmail(args: SendArgs): Promise<{ id: string; delivered: boolean }> {
+  // Checked before the row is written, and recorded as its own status so an
+  // unsent email is visibly a choice rather than a delivery failure.
+  if (await suppressedFor(args.to, args.template).catch(() => false)) {
+    const [skipped] = await db
+      .insert(emailLogs)
+      .values({
+        to: args.to,
+        subject: args.subject,
+        body: args.text,
+        template: args.template,
+        status: "SUPPRESSED",
+      })
+      .returning();
+    return { id: skipped.id, delivered: false };
+  }
+
   const [log] = await db
     .insert(emailLogs)
     .values({
