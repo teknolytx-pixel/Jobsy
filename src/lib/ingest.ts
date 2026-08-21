@@ -196,21 +196,140 @@ async function runBoard(p: JobProvider, board: string): Promise<IngestSummary> {
  * src/lib/sources.ts and runs from the job_sources table. `/api/ingest` runs
  * both; see runEverything() below.
  */
-export async function ingestAll(): Promise<IngestSummary[]> {
+export type IngestAllResult = {
+  runs: IngestSummary[];
+  /** Boards the clock ran out on. Empty when everything was covered. */
+  skipped: { source: string; board: string }[];
+  truncated: boolean;
+};
+
+/** Headroom reserved for one more board before the deadline. */
+export const PER_BOARD_RESERVE_MS = 9_000;
+
+export type BoardRef = { source: string; board: string };
+
+/**
+ * The scheduling decision, as a pure function: given every board, when each was
+ * last run, and how much clock is left, which run now and which defer?
+ *
+ * Split out from ingestAll so it can be tested without a database or a network
+ * — the ordering and the budget arithmetic are the parts that can be subtly
+ * wrong, and the parts that starve a board forever if they are.
+ */
+export function planBoards<T extends BoardRef>(
+  all: T[],
+  lastRunAt: Map<string, number>,
+  opts: { deadline?: number; now: number; perBoardMs?: number }
+): { run: T[]; skipped: T[] } {
+  const reserve = opts.perBoardMs ?? PER_BOARD_RESERVE_MS;
+  const key = (b: BoardRef) => `${b.source}|${b.board}`;
+
+  // Least-recently-run first. Without this, a truncated run would starve the
+  // tail of the list forever — the same boards would be fetched every night and
+  // the last few never at all.
+  // A board with no history sorts first, and -Infinity says so rather than
+  // relying on 0 happening to be smaller than every real timestamp. That
+  // assumption holds for epoch milliseconds and silently fails for anything
+  // else — a test caught it doing exactly that.
+  const at = (b: BoardRef) => lastRunAt.get(key(b)) ?? -Infinity;
+  const ordered = [...all].sort((a, b) => at(a) - at(b));
+
+  if (!opts.deadline) return { run: ordered, skipped: [] };
+
+  const run: T[] = [];
+  const skipped: T[] = [];
+  // Cost is assumed, not measured: each board is charged the reserve whether it
+  // takes that long or not. Optimism here is what produced the original bug.
+  let projected = opts.now;
+  for (const b of ordered) {
+    if (projected + reserve > opts.deadline) skipped.push(b);
+    else {
+      run.push(b);
+      projected += reserve;
+    }
+  }
+  return { run, skipped };
+}
+
+/**
+ * SRC-015 — a bounded run, and coverage by rotation.
+ *
+ * The host kills a serverless function at its plan's ceiling — 60 seconds on
+ * Vercel Hobby, whatever `maxDuration` claims. This loop had no notion of that,
+ * so as boards were added it eventually ran past the limit and was killed
+ * mid-flight. That failure is nastier than it sounds:
+ *
+ *   • The response body is empty, so the caller sees nothing, not an error.
+ *   • Boards already processed HAVE written to the database, so the run looks
+ *     partially successful and nobody investigates.
+ *   • Everything after the kill — including runMaintenance(), which expires
+ *     ghost jobs and purges old data — silently never happens, every night.
+ *
+ * So the run is now bounded, and boards are ordered least-recently-run first.
+ * A single invocation may not cover everything; successive invocations rotate
+ * through, and whatever was skipped is REPORTED rather than dropped quietly.
+ */
+export async function ingestAll(opts: { deadline?: number } = {}): Promise<IngestAllResult> {
   const providers = activeProviders();
   if (!providers.length) {
     console.warn("[ingest] no query providers configured — connected companies still sync");
-    return [];
+    return { runs: [], skipped: [], truncated: false };
   }
 
-  const out: IngestSummary[] = [];
+  const pairs: { p: JobProvider; board: string; source: string }[] = [];
   for (const p of providers) {
-    for (const board of await p.boards()) {
-      out.push(await runBoard(p, board));
-      await new Promise((r) => setTimeout(r, 250)); // be a polite client
-    }
+    for (const board of await p.boards()) pairs.push({ p, board, source: p.source });
   }
-  return out;
+
+  const last = await db
+    .select({
+      source: ingestRuns.source,
+      board: ingestRuns.board,
+      at: sql<string | null>`max(${ingestRuns.startedAt})`,
+    })
+    .from(ingestRuns)
+    .groupBy(ingestRuns.source, ingestRuns.board);
+
+  const lastAt = new Map<string, number>();
+  for (const r of last) {
+    lastAt.set(`${r.source}|${r.board ?? ""}`, r.at ? new Date(r.at).getTime() : 0);
+  }
+
+  const plan = planBoards(pairs, lastAt, { deadline: opts.deadline, now: Date.now() });
+  const runs: IngestSummary[] = [];
+  const skipped: BoardRef[] = plan.skipped.map((b) => ({ source: b.source, board: b.board }));
+
+  const hasTime = () => !opts.deadline || Date.now() + PER_BOARD_RESERVE_MS <= opts.deadline;
+
+  for (const { p, board } of plan.run) {
+    // Re-checked against the real clock, not the projection: a board that took
+    // far longer than the reserve must not push the run past the ceiling.
+    if (!hasTime()) {
+      skipped.push({ source: p.source, board });
+      continue;
+    }
+    runs.push(await runBoard(p, board));
+    await new Promise((r) => setTimeout(r, 250)); // be a polite client
+  }
+
+  // The reserve is a pessimistic estimate, so a run of fast boards leaves time
+  // on the table. Spend it rather than deferring work for a day over an
+  // estimate that turned out to be wrong.
+  for (const { p, board } of plan.skipped) {
+    if (!hasTime()) break;
+    const i = skipped.findIndex((s) => s.source === p.source && s.board === board);
+    if (i >= 0) skipped.splice(i, 1);
+    runs.push(await runBoard(p, board));
+    await new Promise((r) => setTimeout(r, 250));
+  }
+
+  if (skipped.length) {
+    console.warn(
+      `[ingest] out of time — ${skipped.length} board(s) deferred to the next run: ` +
+        skipped.map((s) => `${s.source}/${s.board}`).join(", ")
+    );
+  }
+  return { runs, skipped, truncated: skipped.length > 0 };
 }
 
 /** Retire postings a provider has stopped returning. */

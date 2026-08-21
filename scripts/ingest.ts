@@ -16,7 +16,10 @@ async function main() {
   }
 
   const t0 = Date.now();
-  const runs = await ingestAll();
+  // No deadline from the CLI: this runs on a machine nobody is going to kill at
+  // 60 seconds, so it covers every board in one pass. The deadline exists for
+  // the serverless path (SRC-015).
+  const { runs, skipped } = await ingestAll();
 
   if (!runs.length) {
     console.log(
@@ -45,6 +48,12 @@ async function main() {
     { fetched: 0, created: 0, updated: 0 }
   );
   const stale = await deactivateStale();
+
+  if (skipped.length) {
+    console.log(
+      `\n  deferred: ${skipped.map((s) => `${s.source}/${s.board}`).join(", ")}`
+    );
+  }
 
   console.log(
     `\n${totals.created} new jobs, ${totals.updated} refreshed, ${stale} retired ` +

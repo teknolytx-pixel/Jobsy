@@ -7,7 +7,22 @@ import { runMaintenance } from "@/lib/maintenance";
 import { secretEquals } from "@/lib/tokens";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+/**
+ * SRC-015 — 60, not 300.
+ *
+ * Vercel clamps this to the plan ceiling regardless of what is written here,
+ * and Hobby's ceiling is 60 seconds. Claiming 300 did not buy any time; it just
+ * meant the code believed it had five minutes, overran, and was killed with an
+ * empty response body. Stating the real number keeps the budget below honest.
+ */
+export const maxDuration = 60;
+
+/**
+ * Wall-clock budget for the work, leaving headroom to serialise a response.
+ * A run that gets killed reports nothing at all, which is strictly worse than
+ * a run that stops early and says which boards it deferred.
+ */
+const BUDGET_MS = 45_000;
 
 const authorized = (req: Request) => {
   const secret = env.cronSecret;
@@ -75,17 +90,26 @@ export async function POST(req: Request) {
 
 async function runIngest() {
   const started = Date.now();
+  const deadline = started + BUDGET_MS;
 
   // 1. targeted — every job each connected employer currently has posted
   const companies = await syncAllSources();
-  // 2. broad — query-based discovery across the aggregators
-  const runs = await ingestAll();
+  // 2. broad — query-based discovery across the aggregators, bounded by the
+  //    clock and rotating least-recently-run boards first.
+  const { runs, skipped, truncated } = await ingestAll({ deadline });
   const deactivated = await deactivateStale();
-  // 3. housekeeping — ghost-job expiry, data purge, rate-limit sweep. Runs
-  //    last and independently: a failure here must not lose the ingest result.
-  const maintenance = await runMaintenance().catch((e) => ({
-    errors: [`maintenance failed entirely: ${(e as Error).message}`],
-  }));
+  // 3. housekeeping — ghost-job expiry, data purge, rate-limit sweep.
+  //
+  //    Runs last and independently: a failure here must not lose the ingest
+  //    result. It is also SKIPPED rather than started when the budget is spent,
+  //    because a maintenance pass killed halfway through is how a purge deletes
+  //    rows and never records that it did.
+  const maintenance =
+    Date.now() < deadline
+      ? await runMaintenance().catch((e) => ({
+          errors: [`maintenance failed entirely: ${(e as Error).message}`],
+        }))
+      : { errors: ["skipped: ingest used the whole time budget"] };
 
   const sum = (rows: { fetched: number; created: number; updated: number }[]) =>
     rows.reduce(
@@ -110,6 +134,9 @@ async function runIngest() {
       providers: activeProviders().map((p) => p.source),
       runs,
       totals: sum(runs),
+      // Visible, not silent: these boards ran out of clock and go first next time.
+      truncated,
+      skipped,
     },
     deactivated,
     maintenance,

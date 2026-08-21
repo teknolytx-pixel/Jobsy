@@ -122,5 +122,61 @@ check("TC-DEM-43 a zero or nonsense budget degrades to one, not to zero",
 check("TC-DEM-44 a 1000-request plan spends more of it",
   queriesPerRun(1000) === 12, `${queriesPerRun(1000)}`);
 
+console.log("\nINGEST TIME BUDGET\n");
+
+// SRC-015. The serverless host kills the function at its plan ceiling — 60s on
+// Vercel Hobby, whatever maxDuration claims. The old loop had no notion of that
+// and was killed mid-run: empty response body, half the boards silently never
+// fetched, and runMaintenance() never reached on any night.
+const { planBoards, PER_BOARD_RESERVE_MS } = await import("../src/lib/ingest");
+
+const boards = [
+  { source: "JSEARCH", board: "a" },
+  { source: "JSEARCH", board: "b" },
+  { source: "REMOTIVE", board: "c" },
+  { source: "ARBEITNOW", board: "d" },
+];
+// A realistic epoch: the ordering must not depend on timestamps happening to
+// be larger than zero.
+const NOW = 1_787_000_000_000;
+const noHistory = new Map<string, number>();
+
+const full = planBoards(boards, noHistory, { deadline: NOW + 10 * PER_BOARD_RESERVE_MS, now: NOW });
+check("TC-ING-50 a generous budget runs every board",
+  full.run.length === 4 && full.skipped.length === 0, `${full.run.length} run`);
+
+const tight = planBoards(boards, noHistory, { deadline: NOW + 2 * PER_BOARD_RESERVE_MS, now: NOW });
+check("TC-ING-51 a tight budget defers the rest instead of overrunning",
+  tight.run.length === 2 && tight.skipped.length === 2,
+  `${tight.run.length} run, ${tight.skipped.length} deferred`);
+
+check("TC-ING-52 nothing is lost — every board is either run or reported",
+  tight.run.length + tight.skipped.length === boards.length);
+
+const none = planBoards(boards, noHistory, { deadline: NOW - 1, now: NOW });
+check("TC-ING-53 an already-spent budget starts no board at all",
+  none.run.length === 0 && none.skipped.length === 4);
+
+// The starvation bug this ordering exists to prevent: without it, a truncated
+// run fetches the same first boards every night and the tail is never reached.
+const history = new Map<string, number>([
+  ["JSEARCH|a", NOW - 1_000],       // most recent
+  ["JSEARCH|b", NOW - 90_000_000],  // oldest (25 hours ago)
+  ["REMOTIVE|c", NOW - 50_000],
+]);
+const rotated = planBoards(boards, history, { deadline: NOW + 2 * PER_BOARD_RESERVE_MS, now: NOW });
+check("TC-ING-54 a never-run board goes first",
+  rotated.run[0].board === "d", rotated.run[0].board);
+check("TC-ING-55 the longest-neglected board goes next",
+  rotated.run[1].board === "b", rotated.run[1].board);
+check("TC-ING-56 the most recently run board is the one deferred",
+  rotated.skipped.some((s) => s.board === "a"),
+  rotated.skipped.map((s) => s.board).join(","));
+
+// No deadline means a machine nobody will kill — the CLI path.
+const cli = planBoards(boards, history, { now: NOW });
+check("TC-ING-57 no deadline runs everything",
+  cli.run.length === 4 && cli.skipped.length === 0);
+
 console.log(`\n${pass} passed, 0 failed  —  demand-driven ingestion`.replace("0 failed", `${fail} failed`));
 process.exit(fail ? 1 : 0);
