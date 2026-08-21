@@ -34,6 +34,15 @@ export const LIMITS = {
   swipeDaily: { max: 100, windowSec: 86_400 },
   recruiterSwipeDaily: { max: 200, windowSec: 86_400 },
   urlImport: { max: 20, windowSec: 3600 },
+  /**
+   * RES-005 — AI polish, per candidate, per hour.
+   *
+   * Tight because each call is a burst of one-request-per-bullet against a free
+   * tier shared by every user of this deployment. A candidate polishing the same
+   * resume forty times in an afternoon would exhaust the quota for everyone
+   * else, and the deterministic builder is already the thing doing the work.
+   */
+  resumePolish: { max: 6, windowSec: 3600 },
 } as const satisfies Record<string, Limit>;
 
 export type RateResult = {

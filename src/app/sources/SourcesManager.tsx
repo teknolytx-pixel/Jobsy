@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Avatar, useToast } from "@/components/ui";
+import { Icon, Logo } from "@/components/Icon";
 
 type Source = {
   id: string; company: string; kind: string; kindLabel: string; token: string;
@@ -94,11 +95,11 @@ export default function SourcesManager({ initial }: { initial: Source[] }) {
     <div className="shell">
       <header className="top">
         <a href="/recruiter" className="logo">
-          <span className="spark">🔥</span>
+          <Logo />
           <b>Jobsy</b>
         </a>
         <div className="spacer" />
-        <a className="iconbtn" href="/recruiter">✕</a>
+        <a className="iconbtn" href="/recruiter"><Icon name="close" size={15} label="Close" /></a>
       </header>
 
       <div className="tabs">
@@ -130,7 +131,7 @@ export default function SourcesManager({ initial }: { initial: Source[] }) {
           </button>
         </form>
 
-        {result?.ok ? <div className="ok">✓ {result.text}</div> : null}
+        {result?.ok ? <div className="ok"><Icon name="check" size={13} /> {result.text}</div> : null}
         {result && !result.ok ? (
           <div className="err">
             {result.text}
@@ -156,7 +157,7 @@ export default function SourcesManager({ initial }: { initial: Source[] }) {
 
         {sources.length === 0 ? (
           <div className="emptylist">
-            <span className="big">🏢</span>
+            <span className="big"><Icon name="building" size={34} /></span>
             <b>No companies connected yet</b>
             <br />
             Paste a careers URL above — try <code>boards.greenhouse.io/stripe</code>.
@@ -177,7 +178,9 @@ export default function SourcesManager({ initial }: { initial: Source[] }) {
                       {s.lastJobCount} live · {s.totalImported} imported all-time · synced {when(s.lastRunAt)}
                     </div>
                     {s.lastError ? (
-                      <div className="s2" style={{ color: "#ffb3c1" }}>⚠ {s.lastError.slice(0, 120)}</div>
+                      <div className="s2" style={{ color: "#bfd0fb", display: "flex", gap: 6, alignItems: "flex-start" }}>
+                      <Icon name="alert" size={13} style={{ marginTop: 2 }} /> {s.lastError.slice(0, 120)}
+                    </div>
                     ) : null}
                   </div>
                   <span className={`badge ${st.cls}`}>{st.text}</span>

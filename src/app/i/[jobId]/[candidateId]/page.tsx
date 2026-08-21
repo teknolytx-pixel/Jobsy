@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { companies, db, jobs } from "@/db";
 import { respondToInterest } from "@/lib/swipe";
+import { Icon } from "@/components/Icon";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,7 @@ export default async function InterestResponse({
   if (!row) {
     return (
       <div className="center">
-        <div style={{ fontSize: 40 }}>🤔</div>
+        <div style={{ color: "var(--dim)" }}><Icon name="question" size={38} /></div>
         <h1 style={{ fontSize: 20, margin: 0 }}>That role is no longer listed</h1>
         <p style={{ color: "var(--dim)", maxWidth: 320 }}>
           The posting was removed or filled. Plenty more waiting.
@@ -54,7 +55,7 @@ export default async function InterestResponse({
   if (error) {
     return (
       <div className="center">
-        <div style={{ fontSize: 40 }}>⚠️</div>
+        <div style={{ color: "var(--gold)" }}><Icon name="alert" size={38} /></div>
         <h1 style={{ fontSize: 20, margin: 0 }}>Couldn&rsquo;t record that</h1>
         <p style={{ color: "var(--dim)", maxWidth: 320 }}>{error}</p>
         <a className="btn ghost" href="/swipe" style={{ maxWidth: 240 }}>
@@ -67,7 +68,7 @@ export default async function InterestResponse({
   if (!interested) {
     return (
       <div className="center">
-        <div style={{ fontSize: 40 }}>👍</div>
+        <div style={{ color: "var(--go)" }}><Icon name="thumbUp" size={38} /></div>
         <h1 style={{ fontSize: 22, margin: 0, letterSpacing: "-.4px" }}>Noted — no thanks</h1>
         <p style={{ color: "var(--dim)", maxWidth: 330, lineHeight: 1.6 }}>
           We told {row.company.name} you&rsquo;re not interested in {row.job.title} right now, and you
@@ -82,7 +83,7 @@ export default async function InterestResponse({
 
   return (
     <div className="center">
-      <div style={{ fontSize: 44 }}>🔥</div>
+      <div style={{ color: "var(--brand)" }}><Icon name="sparkle" size={42} /></div>
       <h1
         style={{
           fontSize: 30,
@@ -105,7 +106,7 @@ export default async function InterestResponse({
         href={result.matchId ? `/matches/${result.matchId}` : "/matches"}
         style={{ maxWidth: 260 }}
       >
-        💬 Open the conversation
+        <Icon name="message" size={16} /> Open the conversation
       </a>
       <a className="btn ghost" href="/swipe" style={{ maxWidth: 260 }}>
         Keep swiping

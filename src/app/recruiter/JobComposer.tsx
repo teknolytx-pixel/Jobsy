@@ -217,8 +217,8 @@ export default function JobComposer({
         <label className="field">
           <span>How should candidates apply?</span>
           <select value={f.applyMethod} onChange={(e) => set("applyMethod", e.target.value as "EASY" | "EXTERNAL")}>
-            <option value="EASY">⚡ Easy Apply — profile emailed to me on right-swipe</option>
-            <option value="EXTERNAL">↗ Send them to my own posting</option>
+            <option value="EASY">Easy Apply — profile emailed to me on right-swipe</option>
+            <option value="EXTERNAL">Send them to my own posting</option>
           </select>
         </label>
 

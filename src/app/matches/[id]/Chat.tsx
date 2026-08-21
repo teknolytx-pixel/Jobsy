@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Avatar } from "@/components/ui";
+import { Icon } from "@/components/Icon";
 
 type Msg = { id: string; body: string; at: string; mine: boolean };
 
@@ -63,7 +64,7 @@ export default function Chat({
     <div className="shell fixed">
       <header className="top">
         <a className="iconbtn" href="/matches">
-          ‹
+          <Icon name="external" size={15} label="Back" style={{ transform: "scaleX(-1)" }} />
         </a>
         <Avatar name={other.name} seed={other.id} image={other.image} className="row-av" />
         <div style={{ minWidth: 0, flex: 1 }}>
@@ -92,7 +93,7 @@ export default function Chat({
       <div className="thread">
         {msgs.length === 0 ? (
           <div className="emptylist" style={{ padding: "26px 16px" }}>
-            <span className="big">👋</span>
+            <span className="big"><Icon name="hand" size={34} /></span>
             You matched — someone has to go first. Ask about the team, the timeline, or the comp band.
           </div>
         ) : (

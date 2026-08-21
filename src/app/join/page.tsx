@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { currentUser } from "@/lib/auth";
 import JoinForm from "./JoinForm";
+import { Icon, Logo } from "@/components/Icon";
 
 export const dynamic = "force-dynamic";
 
@@ -31,12 +32,12 @@ export default async function JoinPage({
       <div className="shell">
         <header className="top">
           <a href="/" className="logo">
-            <span className="spark">🔥</span>
+            <Logo />
             <b>Jobsy</b>
           </a>
         </header>
         <div style={{ margin: "48px auto", maxWidth: 460, padding: "0 24px", textAlign: "center", color: "var(--txt)" }}>
-          <div style={{ fontSize: 40, marginBottom: 12 }}>✉️</div>
+          <div style={{ marginBottom: 12, color: "var(--brand)" }}><Icon name="mail" size={38} /></div>
           <h3 style={{ margin: "0 0 10px" }}>Invitation link incomplete</h3>
           <p style={{ color: "var(--dim)", lineHeight: 1.6 }}>
             This link is missing its token. Open the invitation from your email

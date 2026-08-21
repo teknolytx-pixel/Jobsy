@@ -4,6 +4,7 @@ import { db, users } from "@/db";
 import { currentUser } from "@/lib/auth";
 import { Avatar } from "@/components/ui";
 import { REMOTE_LABEL } from "@/components/format";
+import { Icon } from "@/components/Icon";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,7 @@ export default async function CandidateProfile({ params }: { params: Promise<{ i
     <div className="shell">
       <header className="top">
         <a className="iconbtn" href="/recruiter">
-          ‹
+          <Icon name="external" size={15} label="Back" style={{ transform: "scaleX(-1)" }} />
         </a>
         <div className="spacer" />
       </header>

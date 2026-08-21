@@ -9,6 +9,7 @@ import { safeJsonLd, stripHtml } from "@/lib/safeJson";
 import { toJobGeo, type JobRowLike } from "@/lib/geo/adapt";
 import { effectiveRemoteScope } from "@/lib/geo/eligibility";
 import { countriesInRegion, countryName, UNKNOWN_COUNTRY, US_STATES } from "@/lib/geo/countries";
+import { Icon, Logo } from "@/components/Icon";
 
 export const dynamic = "force-dynamic";
 
@@ -181,7 +182,7 @@ export default async function PublicJobPage({ params }: { params: Promise<{ id: 
 
       <header className="top">
         <a href="/" className="logo">
-          <span className="spark">🔥</span>
+          <Logo />
           <b>Jobsy</b>
         </a>
       </header>
@@ -239,7 +240,7 @@ export default async function PublicJobPage({ params }: { params: Promise<{ id: 
         {job.applyMethod === "EASY" ? (
           <>
             <a className="btn" href="/login?mode=signup">
-              ⚡ Apply with one swipe
+              <Icon name="bolt" size={16} /> Apply with one swipe
             </a>
             <div className="note">
               <b>No forms.</b> Create a Jobsy profile once, then a single right-swipe sends it to the
@@ -249,7 +250,7 @@ export default async function PublicJobPage({ params }: { params: Promise<{ id: 
         ) : (
           <>
             <a className="btn blue" href={job.applyUrl ?? job.sourceUrl ?? "#"} target="_blank" rel="noopener noreferrer">
-              Apply on {job.publisher ?? "the company site"} ↗
+              Apply on {job.publisher ?? "the company site"} <Icon name="external" size={15} />
             </a>
             <a className="btn ghost" href="/login?mode=signup">
               Or swipe similar jobs on Jobsy

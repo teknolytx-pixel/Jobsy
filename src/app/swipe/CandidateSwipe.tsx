@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { SwipeDeck, DeckActions, type DeckControls, type Dir } from "@/components/SwipeDeck";
 import { Avatar, MatchOverlay, Sheet, useToast } from "@/components/ui";
 import { money, REMOTE_LABEL, SOURCE_LABEL } from "@/components/format";
+import { Icon, Logo } from "@/components/Icon";
 
 type JobCard = {
   id: string; title: string; company: string; location: string; remote: string;
@@ -145,9 +146,9 @@ export default function CandidateSwipe({
             <span className="pill">{j.seniority}</span>
             <span className="pill pay">{money(j.salaryMin, j.salaryMax)}</span>
             {j.applyMethod === "EASY" ? (
-              <span className="pill hot">⚡ Easy Apply</span>
+              <span className="pill hot"><Icon name="bolt" size={12} /> Easy Apply</span>
             ) : (
-              <span className="pill src">↗ {SOURCE_LABEL[j.source] ?? j.source}</span>
+              <span className="pill src"><Icon name="external" size={11} /> {SOURCE_LABEL[j.source] ?? j.source}</span>
             )}
           </div>
         </div>
@@ -212,12 +213,12 @@ export default function CandidateSwipe({
     <div className="shell fixed">
       <header className="top">
         <div className="logo">
-          <span className="spark">🔥</span>
+          <Logo />
           <b>Jobsy</b>
         </div>
         <div className="spacer" />
         <a className="iconbtn" href="/profile" title="Profile">
-          👤
+          <Icon name="user" size={16} label="Profile" />
         </a>
       </header>
 
@@ -233,12 +234,13 @@ export default function CandidateSwipe({
         <a href="/matches">
           Matches{stats.matches ? <span className="n">{stats.matches}</span> : null}
         </a>
+        <a href="/resume">Resume</a>
       </div>
 
       {cards === null ? (
         <div className="deckwrap">
           <div className="empty">
-            <div className="big">⏳</div>
+            <div className="big"><Icon name="clock" size={38} /></div>
             <h3>Finding your jobs…</h3>
             <p>Ranking live postings against your skills, location and salary target.</p>
           </div>
@@ -253,7 +255,7 @@ export default function CandidateSwipe({
           emptyState={
             geo && geo.excludedByGeography > 0 ? (
               <div className="empty">
-                <div className="big">🌍</div>
+                <div className="big"><Icon name="globe" size={38} /></div>
                 <h3>You&rsquo;ve seen every job open where you work</h3>
                 <p>
                   {geo.excludedByGeography} of the {geo.considered} live postings are based
@@ -266,7 +268,7 @@ export default function CandidateSwipe({
               </div>
             ) : (
               <div className="empty">
-                <div className="big">🎉</div>
+                <div className="big"><Icon name="checkCircle" size={38} /></div>
                 <h3>You&rsquo;ve seen every job</h3>
                 <p>
                   New postings land every time ingestion runs. Check your matches, or widen your
@@ -291,7 +293,7 @@ export default function CandidateSwipe({
 
       {apply?.kind === "easy" ? (
         <Sheet onClose={closeApply}>
-          <h3>⚡ Applied in one swipe</h3>
+          <h3><Icon name="bolt" size={17} /> Applied in one swipe</h3>
           <p className="lead">
             Your profile went straight to whoever owns <b>{apply.job.title}</b> at {apply.job.company}.
             No forms, no re-typing your work history.
@@ -317,7 +319,7 @@ export default function CandidateSwipe({
             rel="noopener noreferrer"
             onClick={() => setTimeout(closeApply, 150)}
           >
-            Open {applyDestination(apply.job, apply.url)} ↗
+            Open {applyDestination(apply.job, apply.url)} <Icon name="external" size={15} />
           </a>
           <button className="btn ghost" onClick={closeApply}>
             Later — keep swiping

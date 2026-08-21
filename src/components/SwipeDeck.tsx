@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Icon } from "./Icon";
 
 export type Dir = "LIKE" | "PASS";
 
@@ -140,8 +141,8 @@ export function SwipeDeck<T extends { id: string }>({
             onPointerUp={idx === 0 ? onUp : undefined}
             onPointerCancel={idx === 0 ? onUp : undefined}
           >
-            <div className="stamp like">LIKE</div>
-            <div className="stamp nope">NOPE</div>
+            <div className="stamp like">INTERESTED</div>
+            <div className="stamp nope">PASS</div>
             {renderCard(item)}
           </div>
         ))}
@@ -166,14 +167,17 @@ export function DeckActions({
     <>
       <p className="hint">{hint}</p>
       <div className="actions">
+        {/* The like control was a heart. On a product where the right-swipe
+            sends someone's profile to an employer, a heart is the wrong promise
+            — this is "yes, this one", not affection. A check says that. */}
         <button className="act no" onClick={onPass} disabled={disabled} aria-label="Pass">
-          ✕
+          <Icon name="close" size={24} />
         </button>
         <button className="act yes" onClick={onLike} disabled={disabled} aria-label="Interested">
-          ❤
+          <Icon name="check" size={26} />
         </button>
         <button className="act sm info" onClick={onInfo} disabled={disabled} aria-label="Details">
-          ℹ
+          <Icon name="info" size={18} />
         </button>
       </div>
     </>

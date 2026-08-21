@@ -1,4 +1,5 @@
 import { wrongRoleMessage, type AppRole } from "@/lib/auth";
+import { Icon, Logo } from "./Icon";
 
 /**
  * AUTH-002 — what a candidate sees when they open an employer page.
@@ -24,7 +25,7 @@ export default function WrongAccount({
     <div className="shell">
       <header className="top">
         <a href={homeHref} className="logo">
-          <span className="spark">🔥</span>
+          <Logo />
           <b>Jobsy</b>
         </a>
       </header>
@@ -38,7 +39,7 @@ export default function WrongAccount({
           color: "var(--txt)",
         }}
       >
-        <div style={{ fontSize: 40, marginBottom: 12 }}>🔑</div>
+        <div style={{ marginBottom: 12, color: "var(--gold)" }}><Icon name="key" size={38} /></div>
         <h3 style={{ margin: "0 0 10px" }}>
           {need === "RECRUITER" ? "Employer area" : "Job seeker area"}
         </h3>

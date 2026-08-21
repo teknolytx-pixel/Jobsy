@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Icon, Logo } from "@/components/Icon";
 
 type Prefs = {
   newMatch: boolean;
@@ -72,13 +73,11 @@ export default function NotificationSettings({ role }: { role: string }) {
     <div className="shell">
       <header className="top">
         <a href="/profile" className="logo">
-          <span className="spark">🔥</span>
+          <Logo />
           <b>Jobsy</b>
         </a>
         <div className="spacer" />
-        <a className="iconbtn" href="/profile">
-          ✕
-        </a>
+        <a className="iconbtn" href="/profile"><Icon name="close" size={15} label="Close" /></a>
       </header>
 
       <div style={{ padding: "12px 16px 40px", color: "var(--txt)" }}>

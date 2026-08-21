@@ -5,6 +5,7 @@ import { applications, candidateSwipes, companies, db, jobs, matches } from "@/d
 import { currentUser, hasRole } from "@/lib/auth";
 import { Avatar } from "@/components/ui";
 import { money, SOURCE_LABEL } from "@/components/format";
+import { Icon, Logo } from "@/components/Icon";
 
 export const dynamic = "force-dynamic";
 
@@ -37,13 +38,11 @@ export default async function AppliedPage() {
     <div className="shell">
       <header className="top">
         <a href="/swipe" className="logo">
-          <span className="spark">🔥</span>
+          <Logo />
           <b>Jobsy</b>
         </a>
         <div className="spacer" />
-        <a className="iconbtn" href="/swipe">
-          ✕
-        </a>
+        <a className="iconbtn" href="/swipe"><Icon name="close" size={15} label="Close" /></a>
       </header>
 
       <div className="tabs">
@@ -52,6 +51,7 @@ export default async function AppliedPage() {
           Applied{rows.length ? <span className="n">{rows.length}</span> : null}
         </button>
         <a href="/matches">Matches{matchCount ? <span className="n">{matchCount}</span> : null}</a>
+        <a href="/resume">Resume</a>
       </div>
 
       <div className="list">
@@ -72,7 +72,7 @@ export default async function AppliedPage() {
 
         {rows.length === 0 ? (
           <div className="emptylist">
-            <span className="big">💼</span>
+            <span className="big"><Icon name="briefcase" size={34} /></span>
             <b>Nothing applied yet</b>
             <br />
             Swipe right on a job in Discover and it lands here.
@@ -87,9 +87,16 @@ export default async function AppliedPage() {
                   {r.company.name} · {r.job.location}
                 </div>
                 <div className="s2">
-                  {r.app.method === "EASY"
-                    ? "⚡ Easy Apply"
-                    : `↗ ${SOURCE_LABEL[r.job.source] ?? r.job.source}`}{" "}
+                  {r.app.method === "EASY" ? (
+                    <>
+                      <Icon name="bolt" size={12} style={{ display: "inline-block", verticalAlign: "-2px" }} /> Easy Apply
+                    </>
+                  ) : (
+                    <>
+                      <Icon name="external" size={12} style={{ display: "inline-block", verticalAlign: "-2px" }} />{" "}
+                      {SOURCE_LABEL[r.job.source] ?? r.job.source}
+                    </>
+                  )}{" "}
                   · {money(r.job.salaryMin, r.job.salaryMax)} ·{" "}
                   {r.app.createdAt.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
                 </div>

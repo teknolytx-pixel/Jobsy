@@ -6,6 +6,7 @@ import { SwipeDeck, DeckActions, type DeckControls, type Dir } from "@/component
 import { Avatar, MatchOverlay, Sheet, useToast } from "@/components/ui";
 import { REMOTE_LABEL } from "@/components/format";
 import JobComposer from "./JobComposer";
+import { Icon, Logo } from "@/components/Icon";
 
 type CandCard = {
   id: string; name: string; headline: string; location: string; remotePref: string;
@@ -180,7 +181,7 @@ export default function RecruiterSwipe({
     <div className="shell fixed">
       <header className="top">
         <div className="logo">
-          <span className="spark">🔥</span>
+          <Logo />
           <b>Jobsy</b>
         </div>
         <div className="spacer" />
@@ -217,7 +218,7 @@ export default function RecruiterSwipe({
       {!jobs.length ? (
         <div className="deckwrap">
           <div className="empty">
-            <div className="big">🎯</div>
+            <div className="big"><Icon name="target" size={38} /></div>
             <h3>Post a job to start sourcing</h3>
             <p>
               You swipe candidates against one specific role, so the fit score means something. Takes
@@ -231,7 +232,7 @@ export default function RecruiterSwipe({
       ) : cards === null ? (
         <div className="deckwrap">
           <div className="empty">
-            <div className="big">⏳</div>
+            <div className="big"><Icon name="clock" size={38} /></div>
             <h3>Ranking candidates…</h3>
             <p>Scoring every open-to-offers profile against {job?.title}.</p>
           </div>
@@ -245,7 +246,7 @@ export default function RecruiterSwipe({
           onSwipe={onSwipe}
           emptyState={
             <div className="empty">
-              <div className="big">🔍</div>
+              <div className="big"><Icon name="search" size={38} /></div>
               <h3>No candidates left for this role</h3>
               <p>
                 Switch job posts above to keep sourcing, or wait for more candidates to finish
@@ -305,7 +306,7 @@ export default function RecruiterSwipe({
 
       {sent ? (
         <Sheet onClose={() => setSent(null)}>
-          <h3>📧 Interest email sent</h3>
+          <h3><Icon name="mail" size={17} /> Interest email sent</h3>
           <p className="lead">
             {sent.name} was asked whether they want to move forward with <b>{job?.title}</b>. If they
             tap <b>I&rsquo;m interested</b>, it becomes a match and chat opens for both of you.

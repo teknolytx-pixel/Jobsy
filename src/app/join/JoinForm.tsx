@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Icon, Logo } from "@/components/Icon";
 
 /**
  * ORG-002 — accepting is an affirmative act, not a page load.
@@ -52,7 +53,7 @@ export default function JoinForm({
     <div className="shell">
       <header className="top">
         <a href="/" className="logo">
-          <span className="spark">🔥</span>
+          <Logo />
           <b>Jobsy</b>
         </a>
       </header>
@@ -66,7 +67,9 @@ export default function JoinForm({
           color: "var(--txt)",
         }}
       >
-        <div style={{ fontSize: 40, marginBottom: 12 }}>{done ? "🎉" : "🤝"}</div>
+        <div style={{ marginBottom: 12, color: done ? "var(--go)" : "var(--brand)" }}>
+            <Icon name={done ? "checkCircle" : "hand"} size={38} />
+          </div>
 
         {done ? (
           <>

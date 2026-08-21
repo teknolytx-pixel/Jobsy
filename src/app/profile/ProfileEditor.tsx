@@ -3,6 +3,7 @@
 import { useState } from "react";
 // Country list only — the centroid table stays server-side.
 import { COUNTRIES, REGIONS } from "@/lib/geo/countries";
+import { Icon } from "@/components/Icon";
 
 type Initial = {
   name: string; email: string; headline: string; location: string; remotePref: string;
@@ -120,12 +121,12 @@ export default function ProfileEditor({
     <div className="shell">
       <header className="top">
         <a className="iconbtn" href="/swipe">
-          ‹
+          <Icon name="external" size={15} label="Back" style={{ transform: "scaleX(-1)" }} />
         </a>
         <div style={{ fontWeight: 800, fontSize: 17, letterSpacing: "-.3px" }}>Your profile</div>
         <div className="spacer" />
         <button className="iconbtn" onClick={logout} title="Sign out">
-          ⏻
+          <Icon name="power" size={15} label="Sign out" />
         </button>
       </header>
 
@@ -134,7 +135,7 @@ export default function ProfileEditor({
           <b>{f.email}</b>
           <br />
           {linkedinLinked
-            ? "✓ LinkedIn connected — identity verified. Recruiters see a Verified badge on your card."
+            ? "LinkedIn connected — identity verified. Recruiters see a Verified badge on your card."
             : linkedinAvailable
               ? "Not connected to LinkedIn."
               : "LinkedIn sign-in isn't configured on this deployment."}

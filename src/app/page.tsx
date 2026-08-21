@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { companies, db, jobs } from "@/db";
 import { currentUser } from "@/lib/auth";
 import { env } from "@/lib/env";
+import { Logo } from "@/components/Icon";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,7 @@ export default async function Home() {
     <div className="shell">
       <header className="top">
         <div className="logo">
-          <span className="spark">🔥</span>
+          <Logo />
           <b>Jobsy</b>
         </div>
       </header>

@@ -3,6 +3,7 @@ import { aliasedTable, desc, eq, or, sql } from "drizzle-orm";
 import { companies, db, jobs, matches, messages, users } from "@/db";
 import { currentUser } from "@/lib/auth";
 import { Avatar } from "@/components/ui";
+import { Icon, Logo } from "@/components/Icon";
 
 export const dynamic = "force-dynamic";
 
@@ -35,13 +36,11 @@ export default async function MatchesPage() {
     <div className="shell">
       <header className="top">
         <a href="/swipe" className="logo">
-          <span className="spark">🔥</span>
+          <Logo />
           <b>Jobsy</b>
         </a>
         <div className="spacer" />
-        <a className="iconbtn" href="/swipe" title="Back to swiping">
-          ✕
-        </a>
+        <a className="iconbtn" href="/swipe" title="Back to swiping"><Icon name="close" size={15} label="Close" /></a>
       </header>
 
       <div className="tabs">
@@ -50,12 +49,13 @@ export default async function MatchesPage() {
         <button className="on">
           Matches{rows.length ? <span className="n">{rows.length}</span> : null}
         </button>
+        <a href="/resume">Resume</a>
       </div>
 
       <div className="list">
         {rows.length === 0 ? (
           <div className="emptylist">
-            <span className="big">🔥</span>
+            <span className="big"><Icon name="sparkle" size={34} /></span>
             <b>No matches yet</b>
             <br />A match happens when both sides swipe right on the same job. Keep swiping — or post a
             job and start sourcing.

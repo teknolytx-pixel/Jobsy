@@ -1,9 +1,10 @@
+import { Logo } from "@/components/Icon";
 export default function LegalLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="shell">
       <header className="top">
         <a href="/" className="logo">
-          <span className="spark">🔥</span>
+          <Logo />
           <b>Jobsy</b>
         </a>
       </header>

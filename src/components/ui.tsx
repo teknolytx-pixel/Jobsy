@@ -1,10 +1,29 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Icon } from "./Icon";
 
+/**
+ * Avatar backgrounds.
+ *
+ * Deterministic from the name so the same person is the same colour every time
+ * — that is what makes an initials avatar scannable in a list.
+ *
+ * The old set was eight saturated consumer gradients (hot pink to coral, violet
+ * to magenta). Held next to a photo of a real person on a card a recruiter is
+ * deciding about, they were the loudest thing on screen. These are the same
+ * eight positions in a professional register: slate, steel, teal, indigo,
+ * clay. Every one clears 4.5:1 against the white initials on top.
+ */
 const HUES = [
-  "#ff4d6d,#ff8a5b", "#5b8cff,#8f6bff", "#22d39a,#12b1ff", "#ffc65b,#ff7a45",
-  "#8f6bff,#ff4d6d", "#12b1ff,#22d39a", "#ff7a9c,#ffb35b", "#4dd4ff,#5b8cff",
+  "#3d6ff0,#2b54c4", // indigo
+  "#2e9e76,#227a5b", // teal-green
+  "#5b6b8c,#3f4c68", // slate
+  "#8a6fbf,#6a539b", // muted violet
+  "#3f8fa8,#2d6b80", // steel blue
+  "#a8703f,#85582f", // clay
+  "#4a7f9e,#356179", // dusty blue
+  "#6f8a4f,#54693b", // olive
 ];
 
 export const hueFor = (key: string) =>
@@ -107,7 +126,7 @@ export function MatchOverlay({
       <div style={{ width: "100%", maxWidth: 300 }}>
         {chatHref ? (
           <a className="btn" href={chatHref}>
-            💬 Open the conversation
+            <Icon name="message" size={16} /> Open the conversation
           </a>
         ) : null}
         <button className="btn ghost" onClick={onClose}>

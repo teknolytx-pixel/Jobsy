@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { COUNTRIES } from "@/lib/geo/countries";
+import { Logo } from "@/components/Icon";
 
 type Initial = {
   name: string;
@@ -74,7 +75,7 @@ export default function OnboardingForm({
     <div className="shell">
       <header className="top">
         <div className="logo">
-          <span className="spark">🔥</span>
+          <Logo />
           <b>Jobsy</b>
         </div>
       </header>
@@ -87,7 +88,7 @@ export default function OnboardingForm({
 
         {linkedinLinked ? (
           <div className="ok" style={{ marginTop: 14 }}>
-            ✓ LinkedIn connected — name, email and photo imported. LinkedIn&rsquo;s OIDC scope
+            LinkedIn connected — name, email and photo imported. LinkedIn&rsquo;s OIDC scope
             doesn&rsquo;t include work history or skills, so those two fields are on you.
           </div>
         ) : null}
@@ -200,7 +201,7 @@ export default function OnboardingForm({
           {err ? <div className="err">{err}</div> : null}
 
           <button className="btn go" disabled={busy} type="submit">
-            {busy ? "Saving…" : "Start swiping →"}
+            {busy ? "Saving…" : "Start swiping"}
           </button>
         </form>
       </div>

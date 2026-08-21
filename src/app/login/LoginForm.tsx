@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Icon, Logo } from "@/components/Icon";
 
 /**
  * LEGAL-009 — enforceable clickwrap.
@@ -102,7 +103,7 @@ export default function LoginForm({ linkedinEnabled }: { linkedinEnabled: boolea
     <div className="shell">
       <header className="top">
         <a href="/" className="logo">
-          <span className="spark">🔥</span>
+          <Logo />
           <b>Jobsy</b>
         </a>
       </header>
@@ -145,8 +146,8 @@ export default function LoginForm({ linkedinEnabled }: { linkedinEnabled: boolea
               <div style={{ display: "flex", gap: 10 }}>
                 {(
                   [
-                    ["CANDIDATE", "💼", "I'm looking for a job"],
-                    ["RECRUITER", "🎯", "I'm hiring"],
+                    ["CANDIDATE", "briefcase", "I'm looking for a job"],
+                    ["RECRUITER", "target", "I'm hiring"],
                   ] as const
                 ).map(([value, icon, label]) => (
                   <button
@@ -164,14 +165,16 @@ export default function LoginForm({ linkedinEnabled }: { linkedinEnabled: boolea
                       fontSize: 13.5,
                       fontWeight: 600,
                       color: "var(--txt)",
-                      background: role === value ? "var(--accent, #ff5a5f)" : "transparent",
+                      background: role === value ? "var(--brand)" : "transparent",
                       border:
                         role === value
                           ? "1px solid transparent"
                           : "1px solid var(--line, #e6e8f0)",
                     }}
                   >
-                    <span style={{ fontSize: 20, display: "block", marginBottom: 4 }}>{icon}</span>
+                    <span style={{ display: "flex", justifyContent: "center", marginBottom: 6 }}>
+                      <Icon name={icon} size={22} />
+                    </span>
                     {label}
                   </button>
                 ))}
