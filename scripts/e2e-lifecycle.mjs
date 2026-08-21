@@ -1172,6 +1172,54 @@ await t("TC-MATCH-006-05", "the settings page exists", async () => {
 });
 
 // ══════════════════════════════════════════════════════════════
+G("E2E-012 · accountability of decisions");
+// ══════════════════════════════════════════════════════════════
+//
+// NFR-005 / BR-011 / AC-014. Two gaps that only matter once someone asks a
+// hard question — which is exactly when it is too late to start recording.
+
+await t("TC-BR-011-01", "a pass without a reason is refused", async () => {
+  const r = await lifeRec.post("/api/swipe", {
+    mode: "recruiter",
+    direction: "PASS",
+    jobId: lifecycleJobId,
+    candidateId: "00000000-0000-0000-0000-000000000000",
+  });
+  eq(r.status, 400);
+  eq(r.json.code, "REJECTION_REASON_REQUIRED");
+  ok(Array.isArray(r.json.allowed) && r.json.allowed.length > 0,
+    "the refusal lists what is acceptable");
+});
+
+await t("TC-BR-011-02", "the vocabulary is fixed and job-related", async () => {
+  const r = await lifeRec.post("/api/swipe", {
+    mode: "recruiter", direction: "PASS", jobId: lifecycleJobId,
+    candidateId: "00000000-0000-0000-0000-000000000000",
+  });
+  const allowed = r.json.allowed ?? [];
+  // No free-text escape hatch: an "OTHER" option would be where unlawful
+  // reasoning gets typed, and it could be neither audited nor aggregated.
+  ok(!allowed.includes("OTHER"), `no free-text option: ${allowed.join(",")}`);
+  ok(!allowed.some((a) => /AGE|GENDER|RACE|NATION|CITIZEN|FAMILY|DISABIL/i.test(a)),
+    `nothing protected in the vocabulary: ${allowed.join(",")}`);
+});
+
+await t("TC-BR-011-03", "an invalid reason is rejected, not stored", async () => {
+  const r = await lifeRec.post("/api/swipe", {
+    mode: "recruiter", direction: "PASS", jobId: lifecycleJobId,
+    candidateId: "00000000-0000-0000-0000-000000000000",
+    rejectionReason: "TOO_OLD",
+  });
+  eq(r.status, 400, "the enum is the boundary, not a suggestion");
+});
+
+await t("TC-NFR-005-01", "the scoring model is versioned", async () => {
+  const { MODEL_VERSION, WEIGHT_TOTAL } = await import("../src/lib/matching/engine.ts");
+  ok(/^\d{4}-\d{2}-\d{2}\./.test(MODEL_VERSION), `dated version: ${MODEL_VERSION}`);
+  eq(WEIGHT_TOTAL, 100, "a model whose components do not sum to 100 is not a percentage");
+});
+
+// ══════════════════════════════════════════════════════════════
 console.log(`\n${"═".repeat(60)}`);
 console.log(`${pass} passed, ${fail} failed  —  end-to-end lifecycle`);
 console.log("═".repeat(60));

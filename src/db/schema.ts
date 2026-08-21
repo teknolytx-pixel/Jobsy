@@ -32,6 +32,28 @@ export const jobStatusEnum = pgEnum("job_status", [
   "ARCHIVED",
 ]);
 export const directionEnum = pgEnum("direction", ["LIKE", "PASS"]);
+
+/**
+ * CAND-006 / REC-011 / BR-011 / AC-014 — why a recruiter passed.
+ *
+ * The rule "rejection must use job-related criteria" was unenforceable because
+ * nothing was recorded: `recruiter_swipes` had a direction and no reason, so
+ * there was no evidence a decision was job-related, and no way to notice a
+ * recruiter whose passes correlated with something they must not.
+ *
+ * Every value here is about the ROLE or the WORK. There is deliberately no
+ * "other" free-text option: a free-text box on a rejection is where unlawful
+ * reasoning gets written down, and it cannot be audited or aggregated.
+ */
+export const rejectionReasonEnum = pgEnum("rejection_reason", [
+  "SKILLS_GAP",
+  "EXPERIENCE_LEVEL",
+  "COMPENSATION_MISMATCH",
+  "WORK_MODEL_MISMATCH",
+  "LOCATION_MISMATCH",
+  "ROLE_FILLED",
+  "NOT_A_FIT_FOR_THIS_ROLE",
+]);
 export const applyMethodEnum = pgEnum("apply_method", ["EASY", "EXTERNAL"]);
 export const jobSourceEnum = pgEnum("job_source", [
   "JOBSY",
@@ -456,6 +478,8 @@ export const candidateSwipes = pgTable(
       .references(() => jobs.id, { onDelete: "cascade" }),
     direction: directionEnum("direction").notNull(),
     score: integer("score").notNull().default(0),
+    /** NFR-005 — which scoring model produced `score`. Null for pre-v2.1 rows. */
+    modelVersion: varchar("model_version", { length: 32 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -479,6 +503,10 @@ export const recruiterSwipes = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     direction: directionEnum("direction").notNull(),
     score: integer("score").notNull().default(0),
+    /** BR-011 — required on a PASS, meaningless on a LIKE. */
+    rejectionReason: rejectionReasonEnum("rejection_reason"),
+    /** NFR-005 — the model that ranked this pair when the decision was made. */
+    modelVersion: varchar("model_version", { length: 32 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -521,6 +549,14 @@ export const matches = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     score: integer("score").notNull().default(0),
+    /**
+     * NFR-005 — which scoring model produced `score`.
+     *
+     * On the swipe too, not only here: a swipe is the moment a ranked decision
+     * was acted on, and that is what a bias audit samples. Null on rows that
+     * predate versioning, which is itself the honest answer — we do not know.
+     */
+    modelVersion: varchar("model_version", { length: 32 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

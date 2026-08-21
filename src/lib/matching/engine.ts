@@ -35,6 +35,33 @@ import { parseRequirements, type Dealbreaker, type Requirements } from "./requir
  *                     100
  */
 
+/**
+ * NFR-005 / NFR-009 / §10.3 — the scoring model, versioned.
+ *
+ * These numbers decide who gets seen. That makes them the single most
+ * consequential constant in the product, and until now they were an unlabelled
+ * literal: nothing recorded which weights produced a given match, so "was this
+ * candidate ranked under the old model or the new one?" had no answer.
+ *
+ * That question is not academic. NYC Local Law 144 requires an annual bias
+ * audit of an automated employment decision tool, and an audit is of a specific
+ * model. Without a version stamp on each result there is no way to say which
+ * model an audit covered, or to re-run last quarter's rankings after a change.
+ *
+ * ── The rule when changing these ──
+ *
+ * Any change to a weight, or to how a component is computed, is a NEW VERSION.
+ * Bump MODEL_VERSION in the same commit. The date is the release date, and the
+ * suffix distinguishes more than one change in a day.
+ *
+ * The values below deliberately differ from the table in FSD v1.0 §10.3
+ * (35/15/15/10/10/5/5/5), which described eight components this engine does not
+ * have. Reconciling the two is a product decision, not a refactor — and now
+ * that the model is versioned, making that change is a traceable event rather
+ * than a silent edit.
+ */
+export const MODEL_VERSION = "2026-08-21.a";
+
 export const WEIGHTS = {
   requiredSkills: 40,
   preferredSkills: 12,
@@ -42,6 +69,9 @@ export const WEIGHTS = {
   compensation: 16,
   workStyle: 14,
 } as const;
+
+/** Sums to 100. A model whose components do not is not a percentage. */
+export const WEIGHT_TOTAL = Object.values(WEIGHTS).reduce((a, b) => a + b, 0);
 
 export type JobInput = {
   title: string;
@@ -73,6 +103,12 @@ export type SkillHit = {
 };
 
 export type MatchResult = {
+  /**
+   * NFR-005 — which model produced this. Carried on every result so a stored
+   * score is never an orphan number: an audit, a dispute, or a candidate asking
+   * "why was I ranked this way" can all be answered against a specific model.
+   */
+  modelVersion: string;
   /** What ranking uses. Floored when `excluded`, so an excluded pair can never
    *  surface even if a caller forgets to check the flag. */
   score: number;
@@ -339,6 +375,7 @@ export function matchScore(job: JobInput, cand: CandidateInput): MatchResult {
   const score = exclusion ? Math.min(rawScore, 5) : rawScore;
 
   return {
+    modelVersion: MODEL_VERSION,
     score,
     rawScore,
     excluded: Boolean(exclusion),

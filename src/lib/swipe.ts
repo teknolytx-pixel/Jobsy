@@ -1,4 +1,6 @@
 import { and, eq } from "drizzle-orm";
+import type { RejectionReason } from "./rejectionReasons";
+import { MODEL_VERSION } from "./matching/engine";
 import { applyRefusalReason, type JobStatus } from "./jobStatus";
 import {
   applications,
@@ -65,10 +67,10 @@ export async function candidateSwipe(
 
   await db
     .insert(candidateSwipes)
-    .values({ candidateId: candidate.id, jobId, direction, score: fit.score })
+    .values({ candidateId: candidate.id, jobId, direction, score: fit.score, modelVersion: MODEL_VERSION })
     .onConflictDoUpdate({
       target: [candidateSwipes.candidateId, candidateSwipes.jobId],
-      set: { direction, score: fit.score },
+      set: { direction, score: fit.score, modelVersion: MODEL_VERSION },
     });
 
   if (direction === "PASS") return { ok: true, direction, matched: false, message: "Passed" };
@@ -143,11 +145,21 @@ export async function candidateSwipe(
 // ─────────────────────────────────────────────────────────────
 // RECRUITER SWIPES A CANDIDATE (against one of their job posts)
 // ─────────────────────────────────────────────────────────────
+// BR-011 — declared in its own import-free module so a client component can
+// use the vocabulary without pulling the database client into the browser
+// bundle. Re-exported here because callers of recruiterSwipe() want both.
+export {
+  REJECTION_REASONS,
+  REJECTION_REASON_LABEL,
+  type RejectionReason,
+} from "./rejectionReasons";
+
 export async function recruiterSwipe(
   recruiter: User,
   jobId: string,
   candidateId: string,
-  direction: Direction
+  direction: Direction,
+  rejectionReason?: RejectionReason | null
 ): Promise<SwipeOutcome> {
   const row = await loadJob(jobId);
   if (!row) throw new Error("Job not found");
@@ -162,10 +174,26 @@ export async function recruiterSwipe(
 
   await db
     .insert(recruiterSwipes)
-    .values({ recruiterId: recruiter.id, jobId, candidateId, direction, score: fit.score })
+    .values({
+      recruiterId: recruiter.id,
+      jobId,
+      candidateId,
+      direction,
+      score: fit.score,
+      // BR-011 — recorded on a PASS, and explicitly cleared on a LIKE so a
+      // reopened decision does not carry the old rejection with it.
+      rejectionReason: direction === "PASS" ? (rejectionReason ?? null) : null,
+      modelVersion: MODEL_VERSION,
+    })
     .onConflictDoUpdate({
       target: [recruiterSwipes.jobId, recruiterSwipes.candidateId],
-      set: { direction, score: fit.score, recruiterId: recruiter.id },
+      set: {
+        direction,
+        score: fit.score,
+        recruiterId: recruiter.id,
+        rejectionReason: direction === "PASS" ? (rejectionReason ?? null) : null,
+        modelVersion: MODEL_VERSION,
+      },
     });
 
   if (direction === "PASS") return { ok: true, direction, matched: false, message: "Passed" };
@@ -268,7 +296,8 @@ async function createMatch(
 
   const [match] = await db
     .insert(matches)
-    .values({ jobId, candidateId, recruiterId, score })
+    // NFR-005 — the match records which model ranked the pair that produced it.
+    .values({ jobId, candidateId, recruiterId, score, modelVersion: MODEL_VERSION })
     .onConflictDoNothing({ target: [matches.jobId, matches.candidateId] })
     .returning();
 

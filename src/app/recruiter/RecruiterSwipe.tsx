@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { REJECTION_REASONS, REJECTION_REASON_LABEL, type RejectionReason } from "@/lib/rejectionReasons";
 import { SwipeDeck, DeckActions, type DeckControls, type Dir } from "@/components/SwipeDeck";
 import { Avatar, MatchOverlay, Sheet, useToast } from "@/components/ui";
 import { REMOTE_LABEL } from "@/components/format";
@@ -51,8 +52,18 @@ export default function RecruiterSwipe({
     void load(activeJob);
   }, [activeJob, load]);
 
-  const onSwipe = useCallback(
-    async (c: CandCard, dir: Dir) => {
+  /**
+   * BR-011 / AC-014 — a pass needs a job-related reason, so the card is held
+   * until one is chosen rather than sent and rejected by the API.
+   *
+   * The card is NOT removed from the deck on a pass until the reason is given.
+   * Removing it first and then asking would leave a dismissed card in limbo if
+   * the recruiter closed the sheet, and the swipe would be silently lost.
+   */
+  const [pendingPass, setPendingPass] = useState<CandCard | null>(null);
+
+  const send = useCallback(
+    async (c: CandCard, dir: Dir, reason?: RejectionReason) => {
       setCards((p) => (p ? p.filter((x) => x.id !== c.id) : p));
       setBusy(true);
       try {
@@ -64,6 +75,7 @@ export default function RecruiterSwipe({
             direction: dir,
             jobId: activeJob,
             candidateId: c.id,
+            ...(reason ? { rejectionReason: reason } : {}),
           }),
         });
         const data = await res.json();
@@ -84,6 +96,17 @@ export default function RecruiterSwipe({
       }
     },
     [activeJob, toast]
+  );
+
+  const onSwipe = useCallback(
+    async (c: CandCard, dir: Dir) => {
+      if (dir === "PASS") {
+        setPendingPass(c);
+        return;
+      }
+      await send(c, dir);
+    },
+    [send]
   );
 
   const renderCard = (c: CandCard) => (
@@ -241,6 +264,43 @@ export default function RecruiterSwipe({
           disabled={!cards?.length || busy}
           hint="Swipe right to email interest · left to pass"
         />
+      ) : null}
+
+      {/*
+        BR-011 / AC-014 — every reason is about the role or the work, and there
+        is no free-text box. An open field on a rejection is where unlawful
+        reasoning gets written down, and it can be neither audited nor
+        aggregated. A fixed list can be — which is the entire point of asking.
+      */}
+      {pendingPass ? (
+        <Sheet onClose={() => setPendingPass(null)}>
+          <h3>Why pass on {pendingPass.name}?</h3>
+          <p className="lead">
+            Recorded with the decision. It isn&rsquo;t shown to the candidate, and
+            it&rsquo;s what lets us show a rejection was job-related if anyone
+            ever asks.
+          </p>
+          <div style={{ display: "grid", gap: 8, marginTop: 6 }}>
+            {REJECTION_REASONS.map((r) => (
+              <button
+                key={r}
+                className="btn"
+                style={{ textAlign: "left", justifyContent: "flex-start" }}
+                disabled={busy}
+                onClick={async () => {
+                  const c = pendingPass;
+                  setPendingPass(null);
+                  await send(c, "PASS", r);
+                }}
+              >
+                {REJECTION_REASON_LABEL[r]}
+              </button>
+            ))}
+          </div>
+          <button className="btn ghost" onClick={() => setPendingPass(null)}>
+            Cancel &mdash; keep this candidate
+          </button>
+        </Sheet>
       ) : null}
 
       {sent ? (
