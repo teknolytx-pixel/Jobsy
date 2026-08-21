@@ -11,6 +11,7 @@ import {
 } from "@/db";
 import { scoreJobForCandidate } from "./match";
 import { checkGeoEligibility, toCandidateGeo, toJobGeo } from "./geo";
+import { isSponsorshipEligible } from "./authorization";
 
 export type JobCard = {
   id: string; title: string; company: string; location: string; remote: string;
@@ -85,6 +86,12 @@ export async function candidateDeck(candidate: User): Promise<JobCard[]> {
       return {
         _excluded: fit.full.excluded,
         _geoEligible: geo.eligible,
+        // BR-006 — Stage 1, beside geography and for the same reason: this
+        // decides WHICH pairs are considered. It never reaches the scorer.
+        _sponsorshipEligible: isSponsorshipEligible({
+          jobSponsorshipAvailable: job.sponsorshipAvailable,
+          candidateRequiresSponsorship: candidate.requiresSponsorship,
+        }),
         id: job.id,
         title: job.title,
         company: company.name,
@@ -120,7 +127,8 @@ export async function candidateDeck(candidate: User): Promise<JobCard[]> {
     // runs on the row, not on the score, because Stage 1 of FSD §34 is the
     // eligibility layer and the scoring engine never sees geography.
     .filter((c) => c._geoEligible)
-    .map(({ _excluded, _geoEligible, ...card }) => card satisfies JobCard)
+    .filter((c) => c._sponsorshipEligible)
+    .map(({ _excluded, _geoEligible, _sponsorshipEligible, ...card }) => card satisfies JobCard)
     // XPLAIN-003 AC-3/5 — an opted-out candidate still sees the same jobs. What
     // changes is the ORDER: newest first instead of score-ranked. Withholding
     // the product because someone exercised a statutory right is retaliation,
@@ -175,6 +183,14 @@ export async function recruiterDeck(recruiter: User, jobId: string): Promise<Can
       return {
         _excluded: fit.full.excluded,
         _geoEligible: geo.eligible,
+        // Symmetrical with the candidate deck. If a role does not sponsor and a
+        // person has said they will need it, neither side benefits from the
+        // introduction — and showing the recruiter a candidate they cannot hire
+        // is how a lawful policy turns into a conversation about status.
+        _sponsorshipEligible: isSponsorshipEligible({
+          jobSponsorshipAvailable: job.sponsorshipAvailable,
+          candidateRequiresSponsorship: c.requiresSponsorship,
+        }),
         id: c.id,
         name: c.name,
         headline: c.headline ?? "Candidate",
@@ -200,7 +216,8 @@ export async function recruiterDeck(recruiter: User, jobId: string): Promise<Can
     // BR-016 / BR-018 — a candidate outside the boundary is not a weaker
     // candidate, they are not in the pool. Skill coverage does not override it.
     .filter((c) => c._geoEligible)
-    .map(({ _excluded, _geoEligible, ...card }) => card satisfies CandidateCard)
+    .filter((c) => c._sponsorshipEligible)
+    .map(({ _excluded, _geoEligible, _sponsorshipEligible, ...card }) => card satisfies CandidateCard)
     .sort((a, b) => b.score - a.score)
     .slice(0, DECK_SIZE);
 }

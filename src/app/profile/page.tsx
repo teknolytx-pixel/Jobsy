@@ -25,6 +25,7 @@ export default async function ProfilePage() {
         openToOffers: user.openToOffers,
         title: user.title ?? "",
         // FSD v1.1 §36.2 — CandidateLocation
+        requiresSponsorship: user.requiresSponsorship,
         currentCountry: user.currentCountry,
         currentPostalCode: user.currentPostalCode,
         searchCountry: user.searchCountry,

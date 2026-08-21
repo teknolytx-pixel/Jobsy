@@ -17,6 +17,7 @@ type Initial = {
   internationalSearchEnabled: boolean;
   remoteEligibleCountries: string[];
   relocationWillingness: string;
+  requiresSponsorship: boolean | null;
 };
 
 export default function ProfileEditor({
@@ -50,6 +51,12 @@ export default function ProfileEditor({
       .filter((c) => c !== "*")
       .join(", "),
     relocationWillingness: initial.relocationWillingness ?? "NONE",
+    requiresSponsorship:
+      initial.requiresSponsorship === null || initial.requiresSponsorship === undefined
+        ? ""
+        : initial.requiresSponsorship
+          ? "YES"
+          : "NO",
   });
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -91,6 +98,8 @@ export default function ProfileEditor({
                     .split(",").map((x) => x.trim().toUpperCase()).filter(Boolean)
                 : [],
         relocationWillingness: f.relocationWillingness,
+        requiresSponsorship:
+          f.requiresSponsorship === "" ? null : f.requiresSponsorship === "YES",
       }),
     });
     const data = await res.json();
@@ -196,6 +205,37 @@ export default function ProfileEditor({
               </small>
             </label>
           </div>
+
+          {/*
+            CAN-004 / BR-006 — the lawful question, asked once and only of the
+            person it concerns.
+
+            It is about SPONSORSHIP, not about status. There is no field here
+            for citizenship, nationality or visa category, and there must never
+            be one: those are protected characteristics under 8 U.S.C. § 1324b,
+            and this answer is the only immigration-adjacent thing Jobsy stores.
+
+            "Prefer not to say" is first and is the default. A blank answer is
+            treated as unstated, never as "yes" — inferring that someone needs
+            sponsorship because they declined to answer would be exactly the
+            discrimination the statute prohibits.
+          */}
+          <label className="field">
+            <span>Will you need visa sponsorship?</span>
+            <select
+              value={f.requiresSponsorship}
+              onChange={(e) => set("requiresSponsorship", e.target.value)}
+            >
+              <option value="">Prefer not to say</option>
+              <option value="NO">No — I'm authorized to work without sponsorship</option>
+              <option value="YES">Yes — now or in the future</option>
+            </select>
+            <small style={{ color: "var(--dim)", fontSize: 12 }}>
+              Only used to hide roles whose employer has said they don&rsquo;t
+              sponsor. It never affects your match score, and recruiters never
+              see it as a filter. Leave it blank and nothing is filtered.
+            </small>
+          </label>
 
           <div className="two">
             <label className="field">

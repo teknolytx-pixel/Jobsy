@@ -196,6 +196,51 @@ function checkInputSurface(): string[] {
  * eligibility layer started importing the engine, the two would fuse and the
  * separation would exist only in the comments.
  */
+/**
+ * BR-006 — the sponsorship gate must stay outside the scoring engine.
+ *
+ * src/lib/authorization.ts exists precisely because the tokens it handles are
+ * banned inside src/lib/matching. An `import { isSponsorshipEligible } from
+ * "../authorization"` in the engine would satisfy every pattern check above
+ * while doing the exact thing they exist to prevent — the prohibited fields
+ * would simply be read one function call away.
+ *
+ * The rule is symmetrical, for the same reason as the geo one: authorization
+ * decides WHICH pairs are considered; the engine decides how strong a
+ * considered pair is. Fusing them re-creates the problem.
+ */
+function checkAuthorizationIsolation(): string[] {
+  const errors: string[] = [];
+  const authFile = join(ROOT, "src", "lib", "authorization.ts");
+
+  for (const file of walk(MATCHING_DIR)) {
+    const src = readFileSync(file, "utf8");
+    for (const [i, line] of src.split("\n").entries()) {
+      if (COMMENT_LINE.test(line)) continue;
+      if (/from\s+["'][^"']*\/authorization["']/.test(line) || /from\s+["']@\/lib\/authorization["']/.test(line)) {
+        errors.push(
+          `${relative(ROOT, file)}:${i + 1} imports the sponsorship gate. Work ` +
+            "authorization is a Stage-1 eligibility question, not a scoring input — " +
+            "reading it here is citizenship-status discrimination one indirection away " +
+            "(IRCA, 8 U.S.C. § 1324b)."
+        );
+      }
+    }
+  }
+
+  // And the gate must not reach back into the engine either.
+  if (existsSync(authFile)) {
+    const src = readFileSync(authFile, "utf8");
+    for (const [i, line] of src.split("\n").entries()) {
+      if (COMMENT_LINE.test(line)) continue;
+      if (/from\s+["'].*matching\//.test(line) || /from\s+["']@\/lib\/matching/.test(line)) {
+        errors.push(`src/lib/authorization.ts:${i + 1} imports the matching engine.`);
+      }
+    }
+  }
+  return errors;
+}
+
 function checkGeoIsolation(): string[] {
   const errors: string[] = [];
   const geoDir = join(ROOT, "src", "lib", "geo");
@@ -217,7 +262,7 @@ function checkGeoIsolation(): string[] {
 }
 
 const violations = scan();
-const surfaceErrors = [...checkInputSurface(), ...checkGeoIsolation()];
+const surfaceErrors = [...checkInputSurface(), ...checkGeoIsolation(), ...checkAuthorizationIsolation()];
 
 if (violations.length === 0 && surfaceErrors.length === 0) {
   console.log("✓ MATCH-030: no prohibited inputs reachable from the matching engine");

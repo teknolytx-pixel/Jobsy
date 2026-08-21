@@ -41,6 +41,17 @@ const Body = z.object({
   /** Empty = unstated; ["SAME"] = own country only; ["*"] = anywhere; else a list. */
   remoteEligibleCountries: z.array(z.string().max(4)).max(50).optional(),
   relocationWillingness: z.enum(["NONE", "DOMESTIC", "INTERNATIONAL"]).optional(),
+  /**
+   * CAN-004 / BR-006 — the candidate's own statement, and the ONLY way this
+   * field is ever set. It is never inferred from a name, a location, a phone
+   * number or anything else, and there is deliberately no field for visa
+   * category or citizenship: those are protected status under 8 U.S.C. § 1324b,
+   * and the lawful question is about sponsorship, not about who someone is.
+   *
+   * Nullable on purpose. "Prefer not to say" must stay available, and it is
+   * treated as unstated rather than as "yes" — see src/lib/authorization.ts.
+   */
+  requiresSponsorship: z.boolean().nullable().optional(),
 });
 
 export async function GET() {
@@ -52,6 +63,7 @@ export async function GET() {
       yearsExp: u.yearsExp, salaryTarget: u.salaryTarget, availability: u.availability,
       skills: u.skills, openToOffers: u.openToOffers, profileReady: u.profileReady,
       title: u.title, companyId: u.companyId, linkedinLinked: Boolean(u.linkedinSub),
+      requiresSponsorship: u.requiresSponsorship,
       currentCountry: u.currentCountry, currentStateProvince: u.currentStateProvince,
       currentCity: u.currentCity, currentPostalCode: u.currentPostalCode,
       searchCountry: u.searchCountry,
