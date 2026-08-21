@@ -1,5 +1,6 @@
+import WrongAccount from "@/components/WrongAccount";
 import { redirect } from "next/navigation";
-import { currentUser } from "@/lib/auth";
+import { currentUser, hasRole } from "@/lib/auth";
 import { listSources, SOURCE_KIND_LABEL } from "@/lib/sources";
 import SourcesManager from "./SourcesManager";
 
@@ -8,6 +9,8 @@ export const dynamic = "force-dynamic";
 export default async function SourcesPage() {
   const user = await currentUser();
   if (!user) redirect("/login");
+  if (!hasRole(user, "RECRUITER"))
+    return <WrongAccount need="RECRUITER" homeHref="/swipe" homeLabel="Go to your job feed" />;
 
   const sources = await listSources();
 

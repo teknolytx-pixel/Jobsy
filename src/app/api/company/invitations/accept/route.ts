@@ -136,7 +136,7 @@ export async function POST(req: Request) {
       .update(users)
       .set({
         companyId: invite.companyId,
-        role: me.role === "CANDIDATE" ? "BOTH" : me.role,
+        role: me.role,
         updatedAt: new Date(),
       })
       .where(eq(users.id, me.id));

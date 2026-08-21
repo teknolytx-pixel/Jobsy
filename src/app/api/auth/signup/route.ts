@@ -15,7 +15,13 @@ const Body = z.object({
   email: z.string().email(),
   password: z.string().min(8, "Password must be at least 8 characters"),
   name: z.string().min(2, "Please enter your name"),
-  role: z.enum(["CANDIDATE", "RECRUITER", "BOTH"]).default("CANDIDATE"),
+  /**
+   * CAN-001 / REC-001 — chosen once, at signup, and only ever one of two.
+   * BOTH is gone: it existed only as the side effect of a candidate posting a
+   * job. Platform staff are flagged by isPlatformAdmin, which no request body
+   * can reach.
+   */
+  role: z.enum(["CANDIDATE", "RECRUITER"]).default("CANDIDATE"),
   location: z.string().max(200).optional(),
   /**
    * LEGAL-009 — clickwrap. The UI presents a separate checkbox directly above

@@ -221,15 +221,9 @@ export default function CandidateSwipe({
         </a>
       </header>
 
-      <div className="roleswitch">
-        <button className="on">💼 Candidate</button>
-        <a
-          href="/recruiter"
-          style={{ flex: 1, padding: "9px 6px", borderRadius: 10, fontSize: 13, fontWeight: 700, color: "var(--dim)", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-        >
-          🎯 {hasJobPosts ? "Recruiter" : "Post a job"}
-        </a>
-      </div>
+      {/* AUTH-002 — the role switcher is gone. An account is one side of the
+          market, so offering to hop to the other one was both a dead end and
+          the thing that made the boundary look optional. */}
 
       <div className="tabs">
         <button className="on">Discover</button>

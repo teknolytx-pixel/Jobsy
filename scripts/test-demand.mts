@@ -173,6 +173,31 @@ check("TC-ING-56 the most recently run board is the one deferred",
   rotated.skipped.some((s) => s.board === "a"),
   rotated.skipped.map((s) => s.board).join(","));
 
+// The comparator must stay valid when NOTHING has run yet, which is every
+// board on a fresh install. A -Infinity sentinel made `x - y` return NaN there,
+// sort() went implementation-defined, and in production the newest provider was
+// deferred every single run while the older ones always went first.
+{
+  const fresh = planBoards(boards, new Map(), {
+    deadline: NOW + 2 * PER_BOARD_RESERVE_MS,
+    now: NOW,
+  });
+  check("TC-ING-58 an all-unrun list still orders without NaN",
+    fresh.run.length === 2 && fresh.skipped.length === 2,
+    `${fresh.run.length} run, ${fresh.skipped.length} deferred`);
+  check("TC-ING-59 every board is accounted for when none have history",
+    new Set([...fresh.run, ...fresh.skipped].map((b) => b.board)).size === boards.length);
+}
+
+// One board with history, the rest without: the unrun ones must all precede it.
+{
+  const oneRun = new Map<string, number>([["JSEARCH|a", NOW - 1_000]]);
+  const mixed = planBoards(boards, oneRun, { now: NOW });
+  check("TC-ING-60 a board that has run sorts after every board that has not",
+    mixed.run[mixed.run.length - 1].board === "a",
+    mixed.run.map((b) => b.board).join(","));
+}
+
 // No deadline means a machine nobody will kill — the CLI path.
 const cli = planBoards(boards, history, { now: NOW });
 check("TC-ING-57 no deadline runs everything",

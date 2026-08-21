@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { applications, companies, db, jobs, matches, recruiterSwipes, users } from "@/db";
-import { AuthError, ForbiddenError, authErrorResponse, requireVerifiedUser, requireUser } from "@/lib/auth";
+import { AuthError, ForbiddenError, authErrorResponse, hasRole, requireVerifiedUser, requireUser } from "@/lib/auth";
 import { extractSkills, inferSeniority, normalizeSkills } from "@/lib/skills";
 import { checkPayTransparency } from "@/lib/compliance/payTransparency";
 import { screenPosting, explainScreen } from "@/lib/compliance/contentScreen";
@@ -125,6 +125,15 @@ export async function POST(req: Request) {
   try {
     // AUTH-006 AC-5 — an unverified address cannot publish a job.
     const user = await requireVerifiedUser();
+    // JOB-001 / BR-002 — only employers post. This is the hole the spec marks
+    // P0 (QA case AUTH-04): before this check the endpoint accepted a
+    // candidate's posting and quietly changed their role to accommodate it.
+    if (!hasRole(user, "RECRUITER")) {
+      throw new ForbiddenError(
+        "Posting a job needs an employer account. This is a job seeker account.",
+        "WRONG_ACCOUNT_TYPE"
+      );
+    }
 
     const rl = await consume("write", user.id);
     if (!rl.ok) return tooMany(rl);
@@ -381,7 +390,8 @@ export async function POST(req: Request) {
     await db
       .update(users)
       .set({
-        role: user.role === "CANDIDATE" ? "BOTH" : user.role,
+        // No promotion. Reaching this line already required RECRUITER.
+        role: user.role,
         companyId: user.companyId ?? company.id,
         updatedAt: new Date(),
       })

@@ -8,7 +8,10 @@ import { normalisePostalCode, resolveLocation, toCountryCode, UNKNOWN_COUNTRY } 
 
 const Body = z.object({
   name: z.string().min(1).optional(),
-  role: z.enum(["CANDIDATE", "RECRUITER", "BOTH"]).optional(),
+  // AUTH-002 — role is NOT accepted here. It used to be, and because the
+  // handler spreads `...rest` straight into the update, any candidate could
+  // PATCH {"role":"RECRUITER"} and cross the boundary in one request. Role is
+  // set once at signup and changed only by platform staff.
   headline: z.string().max(140).optional(),
   bio: z.string().max(2000).optional(),
   location: z.string().max(120).optional(),

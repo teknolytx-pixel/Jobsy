@@ -127,6 +127,47 @@ export async function requireVerifiedUser(): Promise<User> {
   return u;
 }
 
+/**
+ * AUTH-002 / JOB-001 / BR-001 — the candidate/recruiter boundary.
+ *
+ * An account is one thing or the other, permanently. This is not a UI
+ * convention: it is the rule the spec states as a P0 business rule, and before
+ * this existed a candidate could reach /recruiter, post a job, and be silently
+ * promoted to a dual role by the posting endpoint itself.
+ *
+ * `isPlatformAdmin` is the ONLY bypass, and it is deliberately a separate
+ * boolean rather than a third value in the role enum — an admin is staff, not a
+ * kind of user, and conflating the two is how "admin" ends up meaning
+ * "recruiter with extra buttons".
+ */
+export type AppRole = "CANDIDATE" | "RECRUITER";
+
+export function hasRole(u: Pick<User, "role" | "isPlatformAdmin">, role: AppRole): boolean {
+  if (u.isPlatformAdmin) return true;
+  return u.role === role;
+}
+
+const WRONG_ROLE_MESSAGE: Record<AppRole, string> = {
+  RECRUITER:
+    "This is a job seeker account. Posting and sourcing need a separate employer account.",
+  CANDIDATE:
+    "This is an employer account. Applying for roles needs a separate job seeker account.",
+};
+
+/**
+ * API-side gate. Throws ForbiddenError with a stable code so callers get a 403
+ * and a message that explains the boundary rather than just refusing.
+ */
+export async function requireRole(role: AppRole): Promise<User> {
+  const u = await requireUser();
+  if (!hasRole(u, role)) {
+    throw new ForbiddenError(WRONG_ROLE_MESSAGE[role], "WRONG_ACCOUNT_TYPE");
+  }
+  return u;
+}
+
+export const wrongRoleMessage = (role: AppRole) => WRONG_ROLE_MESSAGE[role];
+
 /** ADMIN-001 — platform staff, distinct from any company role. */
 export async function requirePlatformAdmin(): Promise<User> {
   const u = await requireUser();

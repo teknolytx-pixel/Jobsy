@@ -115,6 +115,8 @@ const newEmail = `tester${Date.now()}@demo.jobsy`;
 {
   const { p, ctx } = await session("signup");
   await p.goto(`${BASE}/login?mode=signup`);
+  // CAN-001 — accounts are one side of the market, chosen here and permanent.
+  await p.click('button[aria-pressed]:has-text("looking for a job")');
   await p.fill('input[autocomplete="name"]', "Test Candidate");
   await p.fill('input[type="email"]', newEmail);
   await p.fill('input[type="password"]', SEED_PW);
@@ -281,13 +283,27 @@ console.log("\nAUTHORIZATION\n");
   const r2 = await p.goto(`${BASE}/api/matches`);
   check("Matches rejects anonymous", r2.status() === 401, String(r2.status()));
 
+  // Two separate refusals, and the order matters. Ben is a job seeker, so the
+  // ROLE gate stops him before ownership is ever consulted — that is the
+  // AUTH-002 boundary, not an ownership check, and conflating them would let
+  // one of the two rot unnoticed.
   await login(p, "ben@demo.jobsy");
-  // ben tries to source for a job he doesn't own
-  const own = await p.evaluate(async () => {
+  const wrongRole = await p.evaluate(async () => {
     const r = await fetch("/api/deck?mode=recruiter&jobId=" + encodeURIComponent(window.__jid || "nope"));
     return { s: r.status, b: await r.json() };
   });
-  check("Cannot source for someone else's post", own.s === 400 && /not your job post/i.test(own.b.error), own.b.error);
+  check("A job seeker cannot source at all", wrongRole.s === 403 && wrongRole.b.code === "WRONG_ACCOUNT_TYPE",
+    `${wrongRole.s} ${wrongRole.b.code ?? wrongRole.b.error}`);
+
+  // The demo recruiter IS an employer, so ownership is what stops her here.
+  const { p: r2p, ctx: r2ctx } = await session("authz-rec");
+  await login(r2p, "recruiter@demo.jobsy");
+  const own = await r2p.evaluate(async () => {
+    const r = await fetch("/api/deck?mode=recruiter&jobId=00000000-0000-0000-0000-000000000000");
+    return { s: r.status, b: await r.json() };
+  });
+  check("Cannot source for someone else's post", own.s === 400 && /not your job post/i.test(own.b.error ?? ""), own.b.error);
+  await r2ctx.close();
 
   // ben tries to read a conversation he isn't in
   const mid = matchHref.split("/matches/")[1];

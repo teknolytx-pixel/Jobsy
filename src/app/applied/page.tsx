@@ -1,7 +1,8 @@
+import WrongAccount from "@/components/WrongAccount";
 import { redirect } from "next/navigation";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { applications, candidateSwipes, companies, db, jobs, matches } from "@/db";
-import { currentUser } from "@/lib/auth";
+import { currentUser, hasRole } from "@/lib/auth";
 import { Avatar } from "@/components/ui";
 import { money, SOURCE_LABEL } from "@/components/format";
 
@@ -12,6 +13,8 @@ const n = async (q: Promise<{ n: number }[]>) => (await q)[0]?.n ?? 0;
 export default async function AppliedPage() {
   const user = await currentUser();
   if (!user) redirect("/login");
+  if (!hasRole(user, "CANDIDATE"))
+    return <WrongAccount need="CANDIDATE" homeHref="/recruiter" homeLabel="Go to sourcing" />;
 
   const [rows, likes, matchCount] = await Promise.all([
     db

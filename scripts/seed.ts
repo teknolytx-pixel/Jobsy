@@ -154,6 +154,20 @@ async function main() {
     bio: "Frontend engineer who works close to data — dashboards, charting internals, and the design systems that keep them consistent.",
   });
 
+  /**
+   * The only account that sees both sides.
+   *
+   * isPlatformAdmin is staff, not a third role — the enum stays CANDIDATE or
+   * RECRUITER for everyone, and hasRole() lets an admin through either gate.
+   * That keeps "one account, one role" true of the product while leaving a way
+   * to test both without maintaining two logins.
+   */
+  await upsertUser({
+    email: "admin@demo.jobsy", name: "Platform Admin", passwordHash: hash,
+    role: "RECRUITER", isPlatformAdmin: true, profileReady: true, openToOffers: false,
+    headline: "Platform administrator", location: "Austin, TX", skills: [],
+  });
+
   const others = [];
   for (const c of CANDIDATES) {
     others.push(

@@ -1,7 +1,8 @@
+import WrongAccount from "@/components/WrongAccount";
 import { redirect } from "next/navigation";
 import { eq, sql } from "drizzle-orm";
 import { applications, db, jobs, matches } from "@/db";
-import { currentUser } from "@/lib/auth";
+import { currentUser, hasRole } from "@/lib/auth";
 import { candidateGeoDiagnostics } from "@/lib/deck";
 import CandidateSwipe from "./CandidateSwipe";
 
@@ -12,6 +13,8 @@ const countOf = async (q: Promise<{ n: number }[]>) => (await q)[0]?.n ?? 0;
 export default async function SwipePage() {
   const user = await currentUser();
   if (!user) redirect("/login");
+  if (!hasRole(user, "CANDIDATE"))
+    return <WrongAccount need="CANDIDATE" homeHref="/recruiter" homeLabel="Go to sourcing" />;
   if (!user.profileReady) redirect("/onboarding");
 
   // GEO-007 — if geography is why the deck is thin, say so. An empty deck with

@@ -196,7 +196,7 @@ export async function createCompany(
       .update(users)
       .set({
         companyId: company.id,
-        role: user.role === "CANDIDATE" ? "BOTH" : user.role,
+        role: user.role,
         updatedAt: new Date(),
       })
       .where(eq(users.id, user.id));

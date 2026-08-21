@@ -1,7 +1,8 @@
+import WrongAccount from "@/components/WrongAccount";
 import { redirect } from "next/navigation";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { companies, db, jobs, matches } from "@/db";
-import { currentUser } from "@/lib/auth";
+import { currentUser, hasRole } from "@/lib/auth";
 import RecruiterSwipe from "./RecruiterSwipe";
 
 export const dynamic = "force-dynamic";
@@ -9,6 +10,8 @@ export const dynamic = "force-dynamic";
 export default async function RecruiterPage() {
   const user = await currentUser();
   if (!user) redirect("/login");
+  if (!hasRole(user, "RECRUITER"))
+    return <WrongAccount need="RECRUITER" homeHref="/swipe" homeLabel="Go to your job feed" />;
 
   const rows = await db
     .select({ job: jobs, company: companies })

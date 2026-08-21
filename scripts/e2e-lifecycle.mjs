@@ -895,6 +895,113 @@ await t("TC-ING-006-03", "the ingest endpoint requires the cron secret", async (
 });
 
 // ══════════════════════════════════════════════════════════════
+G("E2E-009 · the candidate / recruiter boundary");
+// ══════════════════════════════════════════════════════════════
+//
+// FSD v1.0 QA case AUTH-04, marked P0. Every one of these passed as a 200
+// before the boundary existed: the posting endpoint accepted a candidate and
+// silently promoted them to a dual role, /api/profile let anyone assign
+// themselves RECRUITER, and /api/swipe took the side to act as from the request
+// body with no check at all.
+//
+// A fresh actor: the candidate from E2E-001 has had their account deleted by
+// the erasure test, so reusing it would produce 401s that look like 403s at a
+// glance and prove nothing about roles.
+const seeker = client();
+const seekerEmail = emailFor("seeker");
+
+await t("setup", "job seeker signs up and verifies", async () => {
+  const r = await seeker.post("/api/auth/signup", {
+    email: seekerEmail,
+    password: "Str0ngPassw0rd!",
+    name: "Sam Seeker",
+    role: "CANDIDATE",
+    location: "Austin, TX",
+    acceptedTerms: true,
+  });
+  eq(r.status, 201);
+  const mail = await lastEmailTo(seekerEmail, "VERIFY_EMAIL");
+  await seeker.get(`/api/auth/verify?token=${encodeURIComponent(tokenFrom(mail.body, "/api/auth/verify"))}`);
+});
+
+await t("TC-AUTH-002-01", "a candidate cannot post a job", async () => {
+  const r = await seeker.post("/api/jobs", {
+    title: "Definitely Not Allowed",
+    companyName: "Candidate Co",
+    location: "Austin, TX",
+    countryCode: "US",
+    description: "Requirements: 5+ years with React and TypeScript.",
+    salaryMin: 150,
+    salaryMax: 185,
+    attestCurrentVacancy: true,
+    benefitsDescription: "Health, dental, vision.",
+  });
+  eq(r.status, 403, "JOB-001 — posting is an employer action");
+  eq(r.json.code, "WRONG_ACCOUNT_TYPE");
+});
+
+await t("TC-AUTH-002-02", "a candidate cannot promote themselves to recruiter", async () => {
+  const r = await seeker.patch("/api/profile", { role: "RECRUITER" });
+  // The field is no longer accepted at all, so the request may succeed while
+  // ignoring it. What must never happen is the role actually changing.
+  const me = await seeker.get("/api/profile");
+  eq(me.json.role, "CANDIDATE", "role must be immutable from the profile API");
+  void r;
+});
+
+await t("TC-AUTH-002-03", "a candidate cannot browse the recruiter deck", async () => {
+  const r = await seeker.get("/api/deck?mode=recruiter&jobId=whatever");
+  eq(r.status, 403, "sourcing people is an employer action");
+});
+
+await t("TC-AUTH-003-01", "a recruiter cannot swipe as a candidate", async () => {
+  const r = await rec.post("/api/swipe", {
+    mode: "candidate",
+    direction: "LIKE",
+    jobId: "00000000-0000-0000-0000-000000000000",
+  });
+  eq(r.status, 403, "AUTH-003 — applying is a job seeker action");
+  eq(r.json.code, "WRONG_ACCOUNT_TYPE");
+});
+
+await t("TC-AUTH-003-02", "a candidate cannot swipe as a recruiter", async () => {
+  const r = await seeker.post("/api/swipe", {
+    mode: "recruiter",
+    direction: "LIKE",
+    jobId: "00000000-0000-0000-0000-000000000000",
+    candidateId: "00000000-0000-0000-0000-000000000000",
+  });
+  eq(r.status, 403);
+});
+
+await t("TC-CAN-001-01", "signup cannot request a role outside the two", async () => {
+  const r = await client().post("/api/auth/signup", {
+    email: emailFor("both"),
+    password: "Str0ngPassw0rd!",
+    name: "Both Sides",
+    role: "BOTH",
+    acceptedTerms: true,
+  });
+  eq(r.status, 400, "BOTH is not a role anyone can choose");
+});
+
+await t("TC-CAN-001-02", "signup cannot request platform staff", async () => {
+  const impostor = client();
+  const r = await impostor.post("/api/auth/signup", {
+    email: emailFor("admin"),
+    password: "Str0ngPassw0rd!",
+    name: "Not An Admin",
+    role: "CANDIDATE",
+    isPlatformAdmin: true,
+    acceptedTerms: true,
+  });
+  eq(r.status, 201, "the extra field is ignored, not fatal");
+  // The proof that it was ignored: staff endpoints still refuse them.
+  const admin = await impostor.get("/api/admin/compliance");
+  eq(admin.status, 403, "isPlatformAdmin must not be settable by a request body");
+});
+
+// ══════════════════════════════════════════════════════════════
 console.log(`\n${"═".repeat(60)}`);
 console.log(`${pass} passed, ${fail} failed  —  end-to-end lifecycle`);
 console.log("═".repeat(60));

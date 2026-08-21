@@ -155,7 +155,7 @@ export async function recruiterDeck(recruiter: User, jobId: string): Promise<Can
       and(
         eq(users.profileReady, true),
         eq(users.openToOffers, true),
-        inArray(users.role, ["CANDIDATE", "BOTH"]),
+        eq(users.role, "CANDIDATE"),
         notInArray(users.id, exclude),
         // AUTH-006 AC-6 — an unverified address never appears in a recruiter's
         // deck. Anyone can type an address they do not control.

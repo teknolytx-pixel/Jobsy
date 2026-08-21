@@ -166,15 +166,8 @@ export default function RecruiterSwipe({
         </button>
       </header>
 
-      <div className="roleswitch">
-        <a
-          href="/swipe"
-          style={{ flex: 1, padding: "9px 6px", borderRadius: 10, fontSize: 13, fontWeight: 700, color: "var(--dim)", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-        >
-          💼 Candidate
-        </a>
-        <button className="on">🎯 Recruiter</button>
-      </div>
+      {/* AUTH-002 — no switch to the candidate side; this is an employer
+          account and the other side needs its own login. */}
 
       <div className="tabs">
         <button className="on">Source</button>

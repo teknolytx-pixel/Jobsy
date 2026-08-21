@@ -227,12 +227,24 @@ export function planBoards<T extends BoardRef>(
   // Least-recently-run first. Without this, a truncated run would starve the
   // tail of the list forever — the same boards would be fetched every night and
   // the last few never at all.
-  // A board with no history sorts first, and -Infinity says so rather than
-  // relying on 0 happening to be smaller than every real timestamp. That
-  // assumption holds for epoch milliseconds and silently fails for anything
-  // else — a test caught it doing exactly that.
-  const at = (b: BoardRef) => lastRunAt.get(key(b)) ?? -Infinity;
-  const ordered = [...all].sort((a, b) => at(a) - at(b));
+  // A board with no history sorts first — but "no history" is handled by an
+  // explicit branch, not by a sentinel value.
+  //
+  // The previous attempt used -Infinity, which is correct right up until BOTH
+  // boards are unrun: `-Infinity - -Infinity` is NaN, and a comparator that
+  // returns NaN makes sort() implementation-defined. On a fresh install every
+  // board is unrun, so that is not an edge case, it is the first run — and it
+  // showed up in production as JSearch never being reached while the older
+  // providers ran every time.
+  const at = (b: BoardRef) => lastRunAt.get(key(b));
+  const ordered = [...all].sort((a, b) => {
+    const x = at(a);
+    const y = at(b);
+    if (x === undefined && y === undefined) return 0;
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    return x - y;
+  });
 
   if (!opts.deadline) return { run: ordered, skipped: [] };
 

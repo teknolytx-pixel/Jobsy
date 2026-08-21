@@ -36,6 +36,9 @@ export default function LoginForm({ linkedinEnabled }: { linkedinEnabled: boolea
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [accepted, setAccepted] = useState(false);
+  // CAN-001 / REC-001 — asked once, at signup, and it is permanent. Null until
+  // chosen so the form cannot be submitted on a default nobody read.
+  const [role, setRole] = useState<"CANDIDATE" | "RECRUITER" | null>(null);
   const [err, setErr] = useState<string | null>(params.get("error"));
   const [notice, setNotice] = useState<string | null>(
     params.get("verified") ? "Your email is verified — welcome to Jobsy." : null
@@ -44,6 +47,10 @@ export default function LoginForm({ linkedinEnabled }: { linkedinEnabled: boolea
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (signup && !role) {
+      setErr("Tell us whether you're looking for a job or hiring — accounts are one or the other.");
+      return;
+    }
     if (signup && !accepted) {
       setErr("Please accept the Terms of Service and Privacy Policy to continue.");
       return;
@@ -55,7 +62,7 @@ export default function LoginForm({ linkedinEnabled }: { linkedinEnabled: boolea
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
-          signup ? { email, password, name, acceptedTerms: true } : { email, password }
+          signup ? { email, password, name, role, acceptedTerms: true } : { email, password }
         ),
       });
       const data = await res.json();
@@ -112,6 +119,52 @@ export default function LoginForm({ linkedinEnabled }: { linkedinEnabled: boolea
         )}
 
         <form onSubmit={submit}>
+          {signup ? (
+            <div className="field" style={{ marginBottom: 14 }}>
+              <span style={{ display: "block", marginBottom: 8 }}>
+                What brings you here?
+              </span>
+              <div style={{ display: "flex", gap: 10 }}>
+                {(
+                  [
+                    ["CANDIDATE", "💼", "I'm looking for a job"],
+                    ["RECRUITER", "🎯", "I'm hiring"],
+                  ] as const
+                ).map(([value, icon, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setRole(value)}
+                    aria-pressed={role === value}
+                    style={{
+                      flex: 1,
+                      padding: "14px 10px",
+                      borderRadius: 12,
+                      cursor: "pointer",
+                      textAlign: "center",
+                      lineHeight: 1.35,
+                      fontSize: 13.5,
+                      fontWeight: 600,
+                      color: "var(--txt)",
+                      background: role === value ? "var(--accent, #ff5a5f)" : "transparent",
+                      border:
+                        role === value
+                          ? "1px solid transparent"
+                          : "1px solid var(--line, #e6e8f0)",
+                    }}
+                  >
+                    <span style={{ fontSize: 20, display: "block", marginBottom: 4 }}>{icon}</span>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <small style={{ color: "var(--dim)", fontSize: 12, display: "block", marginTop: 8 }}>
+                This is permanent. Job seeker accounts can&rsquo;t post roles, and
+                employer accounts can&rsquo;t apply for them &mdash; so nobody is on
+                both sides of the same hire.
+              </small>
+            </div>
+          ) : null}
           {signup ? (
             <label className="field">
               <span>Full name</span>
