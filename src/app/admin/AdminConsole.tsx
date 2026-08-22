@@ -37,6 +37,20 @@ type Compliance = {
   notes: string[];
 };
 
+type Finding = {
+  severity: "CRITICAL" | "WARNING" | "OK";
+  area: "EMAIL" | "CONFIG" | "INGESTION" | "PARSING";
+  title: string;
+  detail: string;
+  action: string | null;
+};
+
+type Health = {
+  windowDays: number;
+  findings: Finding[];
+  counts: Record<string, number>;
+};
+
 type Report = {
   id: string;
   kind: string;
@@ -70,10 +84,11 @@ const QUEUES = [
 const human = (s: string) => s.replace(/_/g, " ").toLowerCase();
 
 export default function AdminConsole({ email }: { email: string }) {
-  const [tab, setTab] = useState<"queue" | "compliance">("queue");
+  const [tab, setTab] = useState<"queue" | "compliance" | "health">("queue");
   const [queue, setQueue] = useState<(typeof QUEUES)[number]["key"]>("OPEN");
   const [reports, setReports] = useState<Report[] | null>(null);
   const [compliance, setCompliance] = useState<Compliance | null>(null);
+  const [health, setHealth] = useState<Health | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ action: string; status: string; note: string }>({
     action: "NONE",
@@ -116,6 +131,18 @@ export default function AdminConsole({ email }: { email: string }) {
   useEffect(() => {
     void loadCompliance();
   }, [loadCompliance]);
+
+  /**
+   * NFR-010. Loaded on mount rather than when the tab is opened, because the
+   * whole point is the badge: an operator who never thinks to look at a Health
+   * tab is exactly the person who needs to be told email is not being sent.
+   */
+  useEffect(() => {
+    void fetch("/api/admin/health", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b) => setHealth(b))
+      .catch(() => {});
+  }, []);
 
   async function decide(reportId: string) {
     // AC-3 — the note is required by the API, and it is required here too so a
@@ -167,6 +194,10 @@ export default function AdminConsole({ email }: { email: string }) {
           {compliance?.privacyRequests.overdueCount ? (
             <span className="n">{compliance.privacyRequests.overdueCount}</span>
           ) : null}
+        </button>
+        <button className={tab === "health" ? "on" : ""} onClick={() => setTab("health")}>
+          Health
+          {health?.findings.length ? <span className="n">{health.findings.length}</span> : null}
         </button>
       </div>
 
@@ -373,6 +404,66 @@ export default function AdminConsole({ email }: { email: string }) {
                   {n}
                 </div>
               ))}
+            </>
+          ) : (
+            <div className="emptylist">Loading…</div>
+          )
+        ) : null}
+
+        {tab === "health" ? (
+          health ? (
+            <>
+              <p style={{ color: "var(--dim)", fontSize: 13.5, margin: "0 0 12px", lineHeight: 1.6 }}>
+                Failures that are invisible from a page load. Unconfigured email still
+                returns success to the person asking for a password reset; a source that
+                has been erroring for a week still leaves the site full of older jobs.
+                Last {health.windowDays} days.
+              </p>
+
+              {health.findings.length === 0 ? (
+                <div className="ok">
+                  <Icon name="check" size={13} /> Nothing wrong that this can detect.
+                </div>
+              ) : null}
+
+              {health.findings.map((f, i) => (
+                <div
+                  key={i}
+                  className={f.severity === "CRITICAL" ? "err" : "row"}
+                  style={{ flexDirection: "column", alignItems: "stretch", gap: 5, display: "flex" }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                    <Icon name={f.severity === "CRITICAL" ? "alert" : "info"} size={14} />
+                    <b style={{ fontSize: 13.5 }}>{f.title}</b>
+                    <span className="badge s">{f.area.toLowerCase()}</span>
+                  </div>
+                  <div className="s2" style={{ marginTop: 0 }}>{f.detail}</div>
+                  {f.action ? (
+                    <div className="s2" style={{ color: "var(--dim)" }}>
+                      <b>Fix:</b> {f.action}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+
+              <div className="stat" style={{ marginTop: 14 }}>
+                <div>
+                  <b>{health.counts.emailSent ?? 0}</b>
+                  <span>Email sent</span>
+                </div>
+                <div>
+                  <b style={{ color: health.counts.emailFailed ? "var(--no)" : undefined }}>
+                    {health.counts.emailFailed ?? 0}
+                  </b>
+                  <span>Failed</span>
+                </div>
+                <div>
+                  <b style={{ color: health.counts.emailLoggedOnly ? "var(--no)" : undefined }}>
+                    {health.counts.emailLoggedOnly ?? 0}
+                  </b>
+                  <span>Never sent</span>
+                </div>
+              </div>
             </>
           ) : (
             <div className="emptylist">Loading…</div>
