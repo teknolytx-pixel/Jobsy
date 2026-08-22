@@ -108,6 +108,14 @@ const TEXT_FIXTURES: Record<string, string> = {
     </job></source>`,
 };
 
+/**
+ * The SSRF guard resolves hostnames before fetching, so these fixtures — which
+ * use invented domains — need a resolver as well as a stubbed fetch. It
+ * returns a public address, meaning the guard runs in full and simply permits
+ * the host. The guard is NOT disabled here; test-safefetch.mts covers refusal.
+ */
+const PUBLIC_DNS = { resolve: async () => [{ address: "93.184.216.34" }] };
+
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === "string" ? input : input.toString();
@@ -182,37 +190,37 @@ check("Publisher names the ATS and the employer",
 // ─────────────────────────────────────────────────────────────
 console.log("\nAUTO-DETECTION (paste a careers URL)\n");
 
-const d1 = await detectSource("https://boards.greenhouse.io/stripe");
+const d1 = await detectSource("https://boards.greenhouse.io/stripe", PUBLIC_DNS);
 check("Direct ATS URL → certain", d1.kind === "GREENHOUSE" && d1.token === "stripe" && d1.confidence === "certain",
   d1.kind ? `${d1.kind}/${d1.token}` : d1.reason);
 
-const d2 = await detectSource("https://jobs.lever.co/netflix");
+const d2 = await detectSource("https://jobs.lever.co/netflix", PUBLIC_DNS);
 check("Lever URL detected", d2.kind === "LEVER" && d2.token === "netflix", d2.kind ? d2.token : d2.reason);
 
-const d3 = await detectSource("https://acme.wd5.myworkdayjobs.com/en-US/CareerSite");
+const d3 = await detectSource("https://acme.wd5.myworkdayjobs.com/en-US/CareerSite", PUBLIC_DNS);
 check("Workday URL → tenant|wd|site token", d3.kind === "WORKDAY" && d3.token === "acme|wd5|CareerSite",
   d3.kind ? d3.token : d3.reason);
 
-const d4 = await detectSource("https://careers.brandedco.com");
+const d4 = await detectSource("https://careers.brandedco.com", PUBLIC_DNS);
 check("Branded page with embedded Greenhouse detected",
   d4.kind === "GREENHOUSE" && d4.token === "brandedco", d4.kind ? `${d4.kind}/${d4.token}` : d4.reason);
 check("Branded page uses og:site_name for the company",
   d4.kind !== null && d4.companyName === "BrandedCo", d4.kind ? d4.companyName : "—");
 
-const d5 = await detectSource("https://www.bespokeco.com");
+const d5 = await detectSource("https://www.bespokeco.com", PUBLIC_DNS);
 check("Bespoke site falls back to JSON-LD", d5.kind === "JSONLD", d5.kind ?? d5.reason);
 check("JSON-LD detection names the hiring org",
   d5.kind === "JSONLD" && d5.companyName === "Bespoke Co", d5.kind ? d5.companyName : "—");
 
-const d6 = await detectSource("https://feeds.acme.com/jobs.xml");
+const d6 = await detectSource("https://feeds.acme.com/jobs.xml", PUBLIC_DNS);
 check("A direct .xml URL is treated as a feed",
   d6.kind === "XML_FEED" || d6.kind === null, d6.kind ?? d6.reason);
 
-const d7 = await detectSource("https://www.opaqueco.com");
+const d7 = await detectSource("https://www.opaqueco.com", PUBLIC_DNS);
 check("Undetectable site fails honestly", d7.kind === null, d7.kind === null ? d7.reason.slice(0, 70) : "WRONGLY detected " + d7.kind);
 check("Failure offers manual routes", d7.kind === null && d7.suggestions.length === 3, `${d7.kind === null ? d7.suggestions.length : 0} suggestions`);
 
-const d8 = await detectSource("not a url at all %%%");
+const d8 = await detectSource("not a url at all %%%", PUBLIC_DNS);
 check("Garbage input rejected", d8.kind === null);
 
 // ─────────────────────────────────────────────────────────────

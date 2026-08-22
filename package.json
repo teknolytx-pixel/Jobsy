@@ -17,7 +17,7 @@
     "test:providers": "tsx scripts/test-providers.mts",
     "test:e2e": "SEED_PASSWORD=local-e2e-password npm run reset && SEED_PASSWORD=local-e2e-password npm run seed && SEED_PASSWORD=local-e2e-password node scripts/e2e.mjs",
     "test:sources": "tsx scripts/test-sources.mts",
-    "test": "npm run guard && npm run test:matching && npm run test:geo && npm run test:demand && npm run test:jobstatus && npm run test:authorization && npm run test:appstatus && npm run test:ai && npm run test:resume && npm run test:providers && npm run test:sources && npm run test:compliance && npm run test:security",
+    "test": "npm run guard && npm run test:matching && npm run test:geo && npm run test:demand && npm run test:jobstatus && npm run test:authorization && npm run test:appstatus && npm run test:ai && npm run test:resume && npm run test:providers && npm run test:sources && npm run test:compliance && npm run test:ssrf && npm run test:security",
     "db:migrate": "drizzle-kit migrate",
     "test:matching": "tsx scripts/test-matching.mts",
     "guard": "tsx scripts/check-prohibited-inputs.mts",
@@ -36,7 +36,8 @@
     "test:appstatus": "tsx scripts/test-appstatus.mts",
     "test:ai": "tsx scripts/test-ai-policy.mts",
     "test:resume": "tsx scripts/test-resume-builder.mts",
-    "make-admin": "tsx scripts/make-admin.mts"
+    "make-admin": "tsx scripts/make-admin.mts",
+    "test:ssrf": "tsx scripts/test-safefetch.mts"
   },
   "dependencies": {
     "bcryptjs": "3.0.3",

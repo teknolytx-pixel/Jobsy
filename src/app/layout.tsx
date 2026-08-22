@@ -10,16 +10,7 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  /**
-   * No maximumScale, deliberately.
-   *
-   * It used to be pinned to 1, which stops pinch-zoom on iOS and Android. That
-   * is a WCAG 2.1 AA failure (1.4.4) and it bites the people least able to
-   * work around it: anyone who needs to magnify a salary figure or a clause in
-   * the terms simply could not. The usual reason for pinning it — stopping iOS
-   * zooming when a text input is focused — is already solved here by inputs
-   * inheriting a 15px+ font size.
-   */
+  maximumScale: 1,
   viewportFit: "cover",
   // Must track --bg in globals.css. This is the colour iOS and Android paint
   // the browser chrome with, so when it drifts from the page background the

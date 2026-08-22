@@ -1,4 +1,5 @@
 import type { AtsKind } from "./providers/ats";
+import { safeFetch, type SafeFetchDeps } from "./safeFetch";
 import { ATS_LABEL } from "./providers/ats";
 
 /**
@@ -149,7 +150,11 @@ function findDeclaredFeed(html: string, base: URL): string | null {
 // ─────────────────────────────────────────────────────────────
 // THE ENTRY POINT
 // ─────────────────────────────────────────────────────────────
-export async function detectSource(rawUrl: string): Promise<Detection | DetectionFailure> {
+export async function detectSource(
+  rawUrl: string,
+  /** Tests only. Production never passes this — see safeFetch.ts. */
+  deps?: SafeFetchDeps
+): Promise<Detection | DetectionFailure> {
   let url: URL;
   try {
     url = new URL(rawUrl.trim().startsWith("http") ? rawUrl.trim() : `https://${rawUrl.trim()}`);
@@ -172,25 +177,20 @@ export async function detectSource(rawUrl: string): Promise<Detection | Detectio
     };
   }
 
-  // ── fetch the page for strategies 2–4 ──
-  let html = "";
-  try {
-    const res = await fetch(url.toString(), { headers: UA, redirect: "follow", cache: "no-store" });
-    if (!res.ok) {
-      return {
-        kind: null,
-        reason: `Couldn't read that page — it returned HTTP ${res.status}.`,
-        suggestions: manualSuggestions(),
-      };
-    }
-    html = (await res.text()).slice(0, 900_000);
-  } catch (e) {
-    return {
-      kind: null,
-      reason: `Couldn't reach that page: ${(e as Error).message}`,
-      suggestions: manualSuggestions(),
-    };
+  /**
+   * ── fetch the page for strategies 2–4 ──
+   *
+   * Through `safeFetch`, not `fetch`. This line used to read the URL directly
+   * with `redirect: "follow"` and no validation, which made it a server-side
+   * request forgery hole: pasting a cloud metadata address or an internal
+   * hostname into the "careers page URL" field made our own server read it and
+   * hand the result back. See src/lib/safeFetch.ts.
+   */
+  const fetched = await safeFetch(url.toString(), deps);
+  if (!fetched.ok) {
+    return { kind: null, reason: fetched.reason, suggestions: manualSuggestions() };
   }
+  const html = fetched.body.slice(0, 900_000);
 
   // ── 2. an ATS is embedded in the page ──
   const fromHtml = matchPatterns(html);
@@ -231,9 +231,11 @@ export async function detectSource(rawUrl: string): Promise<Detection | Detectio
 
   for (const candidate of candidates) {
     try {
-      const res = await fetch(candidate, { headers: UA, cache: "no-store" });
-      if (!res.ok) continue;
-      const body = (await res.text()).slice(0, 4000);
+      // Guarded too: `declared` comes from a <link> tag in a page we do not
+      // control, so it is every bit as attacker-supplied as the original URL.
+      const feed = await safeFetch(candidate, deps);
+      if (!feed.ok) continue;
+      const body = feed.body.slice(0, 4000);
       if (/<(job|item|entry)[\s>]/i.test(body)) {
         return {
           kind: "XML_FEED",
