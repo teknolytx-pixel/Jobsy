@@ -33,11 +33,36 @@ const { audit } = await import("../src/lib/audit");
 
 const args = process.argv.slice(2);
 const revoke = args.includes("--revoke");
+const list = args.includes("--list") || args.length === 0;
 const email = args.find((a) => !a.startsWith("--"))?.trim().toLowerCase();
 
-if (!email) {
-  console.error("\nUsage: npm run make-admin -- you@example.com [--revoke]\n");
-  process.exit(1);
+/**
+ * `--list` exists because the first question is always "which account am I?".
+ *
+ * Running with no arguments used to print a usage line containing a
+ * placeholder, which is an invitation to paste the placeholder — and that is
+ * exactly what happened. Showing the real accounts costs one query and removes
+ * the guess entirely.
+ */
+if (list) {
+  const rows = await db
+    .select({
+      email: users.email,
+      role: users.role,
+      admin: users.isPlatformAdmin,
+      deleted: users.deletedAt,
+    })
+    .from(users)
+    .orderBy(users.createdAt);
+
+  const live = rows.filter((r) => !r.deleted);
+  console.log(`\n  ${live.length} account${live.length === 1 ? "" : "s"}:\n`);
+  for (const r of live) {
+    console.log(`    ${r.admin ? "[admin] " : "        "}${String(r.role).padEnd(10)}  ${r.email}`);
+  }
+  console.log("\n  Copy one of those addresses into:");
+  console.log("    npm run make-admin -- paste-the-address-here\n");
+  process.exit(0);
 }
 
 const [existing] = await db.select().from(users).where(eq(users.email, email)).limit(1);
