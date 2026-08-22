@@ -35,7 +35,8 @@
     "test:authorization": "tsx scripts/test-authorization.mts",
     "test:appstatus": "tsx scripts/test-appstatus.mts",
     "test:ai": "tsx scripts/test-ai-policy.mts",
-    "test:resume": "tsx scripts/test-resume-builder.mts"
+    "test:resume": "tsx scripts/test-resume-builder.mts",
+    "make-admin": "tsx scripts/make-admin.mts"
   },
   "dependencies": {
     "bcryptjs": "3.0.3",

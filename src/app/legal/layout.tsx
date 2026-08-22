@@ -3,7 +3,7 @@ export default function LegalLayout({ children }: { children: React.ReactNode })
   return (
     <div className="shell">
       <header className="top">
-        <a href="/" className="logo">
+        <a href="/home" className="logo">
           <Logo />
           <b>Jobsy</b>
         </a>

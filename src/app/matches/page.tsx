@@ -4,6 +4,7 @@ import { companies, db, jobs, matches, messages, users } from "@/db";
 import { currentUser } from "@/lib/auth";
 import { Avatar } from "@/components/ui";
 import { Icon, Logo } from "@/components/Icon";
+import SignOutButton from "@/components/SignOutButton";
 
 export const dynamic = "force-dynamic";
 
@@ -35,12 +36,13 @@ export default async function MatchesPage() {
   return (
     <div className="shell">
       <header className="top">
-        <a href="/swipe" className="logo">
+        <a href="/home" className="logo">
           <Logo />
           <b>Jobsy</b>
         </a>
         <div className="spacer" />
         <a className="iconbtn" href="/swipe" title="Back to swiping"><Icon name="close" size={15} label="Close" /></a>
+        <SignOutButton />
       </header>
 
       <div className="tabs">

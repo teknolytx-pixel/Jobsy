@@ -6,6 +6,7 @@ import { currentUser, hasRole } from "@/lib/auth";
 import { Avatar } from "@/components/ui";
 import { money, REMOTE_LABEL } from "@/components/format";
 import { Icon, Logo } from "@/components/Icon";
+import SignOutButton from "@/components/SignOutButton";
 
 export const dynamic = "force-dynamic";
 
@@ -32,12 +33,13 @@ export default async function MyJobsPage() {
   return (
     <div className="shell">
       <header className="top">
-        <a href="/recruiter" className="logo">
+        <a href="/home" className="logo">
           <Logo />
           <b>Jobsy</b>
         </a>
         <div className="spacer" />
         <a className="iconbtn" href="/recruiter"><Icon name="close" size={15} label="Close" /></a>
+        <SignOutButton />
       </header>
 
       <div className="tabs">

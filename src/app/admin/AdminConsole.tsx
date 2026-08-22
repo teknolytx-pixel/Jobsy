@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Icon, Logo } from "@/components/Icon";
+import SignOutButton from "@/components/SignOutButton";
 
 /**
  * The admin console.
@@ -147,12 +148,13 @@ export default function AdminConsole({ email }: { email: string }) {
   return (
     <div className="shell">
       <header className="top">
-        <a href="/" className="logo">
+        <a href="/home" className="logo">
           <Logo />
           <b>Jobsy</b>
         </a>
         <div className="spacer" />
         <span className="pill">admin</span>
+        <SignOutButton />
       </header>
 
       <div className="tabs">

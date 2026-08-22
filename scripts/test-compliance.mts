@@ -460,6 +460,47 @@ t("TC-XPLAIN-002-16", "notice carries a version", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// FSD §8.1 — drafts must not become a hole through pay transparency
+// ═══════════════════════════════════════════════════════════════
+//
+// Creating a DRAFT deliberately skips the pay check, because the obligation
+// attaches to an ADVERTISED posting and refusing to save an unfinished one
+// enforces nothing. That makes the publish-time check load-bearing: these
+// assert the rules a draft has to clear on the way out, and that skipping them
+// at save time does not weaken them.
+
+t("TC-DRAFT-01", "an unpriced posting still fails the check that runs at publish", () => {
+  const r = checkPayTransparency({ location: "Denver, CO", ...noPay });
+  assert.equal(r.ok, false, "a Colorado role with no range must not be publishable");
+  assert.ok(r.problems.includes("SALARY_RANGE_REQUIRED"));
+});
+
+t("TC-DRAFT-02", "an unknown employee count applies the rule rather than exempting", () => {
+  // employeeCount is not stored on a job, so a draft published later supplies
+  // no count. Unknown must be strict — a missing fact cannot create an
+  // exemption, or every draft would publish by simply omitting the number.
+  const unknown = checkPayTransparency({ location: "New York, NY", employeeCount: null, ...noPay });
+  assert.equal(unknown.ok, false, "unknown size must be treated as in scope");
+});
+
+t("TC-DRAFT-03", "a genuinely small employer is still exempt when it says so", () => {
+  const tiny = checkPayTransparency({ location: "New York, NY", employeeCount: 1, ...noPay });
+  const unknown = checkPayTransparency({ location: "New York, NY", employeeCount: null, ...noPay });
+  assert.ok(
+    tiny.applicable.length < unknown.applicable.length,
+    "stating a small headcount must narrow scope relative to unknown"
+  );
+});
+
+t("TC-DRAFT-04", "a fully priced posting passes, so drafts are publishable", () => {
+  const ok = checkPayTransparency({
+    location: "Denver, CO", salaryMin: 120, salaryMax: 160,
+    benefitsDescription: "Health, dental, 401k match, 20 days PTO.", now: NOW,
+  });
+  assert.equal(ok.ok, true, ok.message ?? "");
+});
+
 console.log(`\n${pass} passed, ${fail} failed  —  compliance suite\n`);
 if (fail) {
   for (const f of failures) console.error(`  ✗ ${f}`);

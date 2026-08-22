@@ -41,6 +41,17 @@ const Body = z.object({
   requiredSkills: z.array(z.string()).max(20).optional(),
   preferredSkills: z.array(z.string()).max(20).optional(),
   perks: z.array(z.string()).max(10).optional(),
+  /**
+   * FSD §8.1 — save without publishing.
+   *
+   * `DRAFT` has existed in the enum, in the transition table and in the status
+   * labels ("Draft — only you can see it") since the lifecycle was written, and
+   * no code path has ever produced one. Submitting was the only way to save, so
+   * the only way to keep a half-written posting was to put it live.
+   *
+   * Defaults to PUBLISHED so every existing caller is unchanged.
+   */
+  status: z.enum(["DRAFT", "PUBLISHED"]).default("PUBLISHED"),
   applyMethod: z.enum(["EASY", "EXTERNAL"]).default("EASY"),
   applyUrl: z.string().url().optional().nullable(),
   /** WORK-002 — three states. Unstated is the default and never inferred. */
@@ -197,7 +208,25 @@ export async function POST(req: Request) {
       );
     }
 
-    // ── LEGAL-002: pay transparency. Also blocks before any write. ──
+    /**
+     * ── LEGAL-002: pay transparency ──
+     *
+     * Blocks on PUBLISH, not on save.
+     *
+     * The obligation in all sixteen states attaches to a posting that is
+     * ADVERTISED. A draft is visible to its author and nobody else, so refusing
+     * to store one because the salary band is not filled in yet enforces
+     * nothing — it just recreates the problem drafts exist to solve, and pushes
+     * people to publish an incomplete posting in order to keep their work.
+     *
+     * The gate is not weakened, it is moved: the same check runs on the
+     * DRAFT → PUBLISHED transition in PATCH /api/jobs/[id], and a draft that
+     * fails it cannot go live.
+     *
+     * The discrimination screen above is deliberately NOT moved. Unlawful
+     * content should not be stored at all, and the author should be told at the
+     * moment they write it rather than at the end.
+     */
     const pay = checkPayTransparency({
       location: b.location,
       remote: b.remote,
@@ -207,7 +236,7 @@ export async function POST(req: Request) {
       employeeCount: b.employeeCount ?? null,
       consentSource: "EMPLOYER_SUBMITTED",
     });
-    if (!pay.ok) {
+    if (!pay.ok && b.status === "PUBLISHED") {
       return NextResponse.json(
         {
           error: pay.message,
@@ -369,6 +398,10 @@ export async function POST(req: Request) {
         employerSuppliedPay: b.salaryMin != null || b.salaryMax != null,
         consentSource: "EMPLOYER_SUBMITTED",
         description: b.description,
+        status: b.status,
+        // Kept in lockstep with status, exactly as the PATCH route does it. A
+        // drafted posting must not be active, or it stays in candidate decks.
+        active: b.status === "PUBLISHED",
         skills,
         requiredSkills: required,
         preferredSkills: preferred,
@@ -449,9 +482,13 @@ export async function POST(req: Request) {
       {
         ok: true,
         jobId: job.id,
+        status: job.status,
         skills,
         requiredSkills: required,
         preferredSkills: preferred,
+        // Told plainly on a draft, because the pay gate was skipped and the
+        // recruiter should know it is waiting for them at publish time.
+        payTransparencyPending: b.status === "DRAFT" && !pay.ok ? pay.problems : null,
         // LEGAL-002 AC-1 — tell the recruiter which rules applied, even on
         // success. Compliance the user cannot see reads as arbitrary friction.
         payLawsApplied: pay.applicable.map((a) => ({ scope: a.scope, cite: a.rule.cite })),

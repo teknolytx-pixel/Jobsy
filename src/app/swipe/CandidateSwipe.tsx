@@ -5,6 +5,7 @@ import { SwipeDeck, DeckActions, type DeckControls, type Dir } from "@/component
 import { Avatar, MatchOverlay, Sheet, useToast } from "@/components/ui";
 import { money, REMOTE_LABEL, SOURCE_LABEL } from "@/components/format";
 import { Icon, Logo } from "@/components/Icon";
+import SignOutButton from "@/components/SignOutButton";
 
 type JobCard = {
   id: string; title: string; company: string; location: string; remote: string;
@@ -212,14 +213,15 @@ export default function CandidateSwipe({
   return (
     <div className="shell fixed">
       <header className="top">
-        <div className="logo">
+        <a href="/home" className="logo" title="Home">
           <Logo />
           <b>Jobsy</b>
-        </div>
+        </a>
         <div className="spacer" />
         <a className="iconbtn" href="/profile" title="Profile">
           <Icon name="user" size={16} label="Profile" />
         </a>
+        <SignOutButton />
       </header>
 
       {/* AUTH-002 — the role switcher is gone. An account is one side of the

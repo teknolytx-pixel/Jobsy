@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Avatar, useToast } from "@/components/ui";
 import { Icon, Logo } from "@/components/Icon";
+import SignOutButton from "@/components/SignOutButton";
 
 type Source = {
   id: string; company: string; kind: string; kindLabel: string; token: string;
@@ -94,12 +95,13 @@ export default function SourcesManager({ initial }: { initial: Source[] }) {
   return (
     <div className="shell">
       <header className="top">
-        <a href="/recruiter" className="logo">
+        <a href="/home" className="logo">
           <Logo />
           <b>Jobsy</b>
         </a>
         <div className="spacer" />
         <a className="iconbtn" href="/recruiter"><Icon name="close" size={15} label="Close" /></a>
+        <SignOutButton />
       </header>
 
       <div className="tabs">

@@ -40,6 +40,16 @@ const PatchBody = z.object({
    * the more specific statement of intent.
    */
   status: z.enum(JOB_STATUSES).optional(),
+  /**
+   * LEGAL-002 — resent at publish time, because it is not stored on the job.
+   *
+   * `employeeCount` decides which state thresholds bite. Omitting it is treated
+   * as "unknown", and unknown means every rule applies — the strict reading.
+   * That is the right default (a missing fact should not create an exemption),
+   * but it means a genuinely exempt small employer must resend the number when
+   * publishing a draft, or be held to rules that do not apply to them.
+   */
+  employeeCount: z.number().int().min(1).max(5_000_000).nullable().optional(),
   /** JOB-003 / TRUST-001 — "yes, this is still open". */
   confirmStillOpen: z.boolean().optional(),
 });
@@ -228,6 +238,43 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   }
 
   const nextStatus: JobStatus = requested ?? (job.status as JobStatus);
+
+  /**
+   * LEGAL-002 — the pay-transparency gate, at the moment of PUBLISHING.
+   *
+   * Creating a DRAFT deliberately skips this check: the obligation attaches to
+   * an advertised posting, and refusing to save an unfinished one enforces
+   * nothing while pushing people to publish in order to keep their work.
+   *
+   * Which makes THIS the load-bearing check. A draft that has never been
+   * validated is about to become public, so the same rules run here against the
+   * job as it will actually be published — the merged values, not the ones it
+   * was created with. Without this the draft feature would be a hole straight
+   * through pay transparency in sixteen states.
+   */
+  if (nextStatus === "PUBLISHED" && job.status !== "PUBLISHED") {
+    const pay = checkPayTransparency({
+      location: next.location,
+      remote: next.remote,
+      salaryMin: next.salaryMin,
+      salaryMax: next.salaryMax,
+      benefitsDescription: next.benefitsDescription,
+      employeeCount: b.employeeCount ?? null,
+      consentSource: "EMPLOYER_SUBMITTED",
+    });
+    if (!pay.ok) {
+      return NextResponse.json(
+        {
+          error: pay.message,
+          code: "PAY_TRANSPARENCY_REQUIRED",
+          problems: pay.problems,
+          laws: pay.applicable.map((a) => ({ scope: a.scope, cite: a.rule.cite })),
+        },
+        { status: 400 }
+      );
+    }
+  }
+
   const statusPatch = { status: nextStatus, active: isVisible(nextStatus) };
 
   await db

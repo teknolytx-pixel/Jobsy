@@ -58,6 +58,15 @@ export default function JobComposer({
   const [busy, setBusy] = useState(false);
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((p) => ({ ...p, [k]: v }));
 
+  /**
+   * `asDraft` skips the checks that only matter once a posting is public.
+   *
+   * The attestation and the remote-scope question are asked at publish time,
+   * not at save time: a half-written posting has nothing to attest to yet, and
+   * being forced to answer them in order to keep your work is exactly the
+   * problem drafts exist to solve. Pay transparency is skipped server-side for
+   * the same reason, and re-checked on the way out of draft.
+   */
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     // Catch it here rather than letting the server reject it, so the message
@@ -76,6 +85,10 @@ export default function JobComposer({
       setErr("Say why this role needs local candidates. We record the reason with the posting.");
       return;
     }
+    await send(false);
+  }
+
+  async function send(draft: boolean) {
     setBusy(true);
     setErr(null);
     const res = await fetch("/api/jobs", {
@@ -98,6 +111,7 @@ export default function JobComposer({
         attestCurrentVacancy: f.attest,
         benefitsDescription: f.benefits.trim() || null,
         employeeCount: f.employeeCount ? Number(f.employeeCount) : null,
+        status: draft ? "DRAFT" : "PUBLISHED",
         sponsorshipAvailable: f.sponsorship === "" ? null : f.sponsorship === "YES",
         countryCode: f.countryCode,
         postalCode: f.postalCode.trim() || null,
@@ -463,6 +477,19 @@ export default function JobComposer({
         </label>
 
         {err ? <div className="err">{err}</div> : null}
+
+        <button
+          className="btn ghost"
+          type="button"
+          disabled={busy}
+            onClick={() => void send(true)}
+        >
+          {busy ? "Saving…" : "Save as draft"}
+        </button>
+        <div className="s2" style={{ color: "var(--dim2)", margin: "6px 2px 0", lineHeight: 1.5 }}>
+          A draft is visible only to you. Salary-range rules are checked when you
+          publish, not when you save.
+        </div>
 
         <button className="btn go" type="submit" disabled={busy}>
           {busy ? "Posting…" : "Publish job"}

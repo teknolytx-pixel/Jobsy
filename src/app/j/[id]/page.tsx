@@ -181,7 +181,7 @@ export default async function PublicJobPage({ params }: { params: Promise<{ id: 
       />
 
       <header className="top">
-        <a href="/" className="logo">
+        <a href="/home" className="logo">
           <Logo />
           <b>Jobsy</b>
         </a>

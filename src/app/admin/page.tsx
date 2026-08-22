@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { currentUser } from "@/lib/auth";
 import { Icon, Logo } from "@/components/Icon";
 import AdminConsole from "./AdminConsole";
+import SignOutButton from "@/components/SignOutButton";
 
 export const dynamic = "force-dynamic";
 
@@ -28,10 +29,11 @@ export default async function AdminPage() {
     return (
       <div className="shell">
         <header className="top">
-          <a href="/" className="logo">
+          <a href="/home" className="logo">
             <Logo />
             <b>Jobsy</b>
           </a>
+          <SignOutButton />
         </header>
         <div className="center">
           <div style={{ color: "var(--gold)" }}>

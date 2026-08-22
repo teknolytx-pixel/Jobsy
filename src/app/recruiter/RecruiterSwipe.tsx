@@ -7,6 +7,7 @@ import { Avatar, MatchOverlay, Sheet, useToast } from "@/components/ui";
 import { REMOTE_LABEL } from "@/components/format";
 import JobComposer from "./JobComposer";
 import { Icon, Logo } from "@/components/Icon";
+import SignOutButton from "@/components/SignOutButton";
 
 type CandCard = {
   id: string; name: string; headline: string; location: string; remotePref: string;
@@ -180,14 +181,15 @@ export default function RecruiterSwipe({
   return (
     <div className="shell fixed">
       <header className="top">
-        <div className="logo">
+        <a href="/home" className="logo" title="Home">
           <Logo />
           <b>Jobsy</b>
-        </div>
+        </a>
         <div className="spacer" />
         <button className="iconbtn" onClick={() => setComposer(true)} title="Post a job">
           ＋
         </button>
+        <SignOutButton />
       </header>
 
       {/* AUTH-002 — no switch to the candidate side; this is an employer

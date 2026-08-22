@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Icon, Logo } from "@/components/Icon";
 import ResumeUpload from "./ResumeUpload";
+import SignOutButton from "@/components/SignOutButton";
 
 /**
  * The resume screen.
@@ -121,7 +122,7 @@ export default function ResumeBuilder() {
   return (
     <div className="shell">
       <header className="top">
-        <a href="/swipe" className="logo">
+        <a href="/home" className="logo">
           <Logo />
           <b>Jobsy</b>
         </a>
@@ -129,6 +130,7 @@ export default function ResumeBuilder() {
         <a className="iconbtn" href="/swipe">
           <Icon name="close" size={15} label="Close" />
         </a>
+        <SignOutButton />
       </header>
 
       <div className="tabs">
