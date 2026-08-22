@@ -46,7 +46,8 @@ if (!rows.length) {
 const from = process.env.EMAIL_FROM ?? "Jobsy <onboarding@resend.dev>";
 const hasKey = Boolean(process.env.RESEND_API_KEY?.trim());
 
-console.log(`\n  RESEND_API_KEY   ${hasKey ? "set" : "NOT SET — nothing can be delivered"}`);
+console.log(`\n  ── this machine's .env (NOT the server that sent the messages) ──`);
+console.log(`  RESEND_API_KEY   ${hasKey ? "set" : "not set"}`);
 console.log(`  EMAIL_FROM       ${from}`);
 console.log(`  APP_URL          ${process.env.NEXT_PUBLIC_APP_URL ?? "(unset — links will point at localhost)"}`);
 console.log(`\n  Last ${rows.length} message${rows.length === 1 ? "" : "s"}${who ? ` to ${who}` : ""}:\n`);
@@ -61,9 +62,19 @@ for (const r of rows) {
 
 console.log("\n  ── What this means ──\n");
 
+const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+if (/jobsy-weld/i.test(appUrl)) {
+  console.log("  NEXT_PUBLIC_APP_URL points at jobsy-weld, the OLD Vercel project.");
+  console.log("  Even once email sends, every reset and verification link will take");
+  console.log("  people to a stale site where the token is not valid.");
+  console.log("  Fix: set it to https://jobsy-git-main-jobsy3.vercel.app and redeploy.\n");
+}
+
 if (counts.LOGGED_ONLY) {
-  console.log("  LOGGED_ONLY means RESEND_API_KEY was missing, so those messages were");
-  console.log("  printed to the server log and thrown away. Nobody received them.");
+  console.log("  LOGGED_ONLY means the SERVER that handled the request had no");
+  console.log("  RESEND_API_KEY, so those messages were printed to its log and thrown");
+  console.log("  away. Nobody received them. A key set on this laptop does not count —");
+  console.log("  production reads Vercel's environment, which is separate.");
   console.log("  Fix: add RESEND_API_KEY in Vercel → Settings → Environment Variables,");
   console.log("  tick all three environments, then redeploy.\n");
 }
