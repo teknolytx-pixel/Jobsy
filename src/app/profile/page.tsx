@@ -37,6 +37,12 @@ export default async function ProfilePage() {
       }}
       linkedinLinked={Boolean(user.linkedinSub)}
       linkedinAvailable={env.linkedin.enabled}
+      // The only route to /admin in the whole product. The console has existed
+      // behind requirePlatformAdmin with nothing linking to it, which for a
+      // moderation queue means reports arrive and nobody is told where to read
+      // them. Shown to administrators only — everyone else never learns it
+      // exists, which is the correct amount of information for them to have.
+      isPlatformAdmin={user.isPlatformAdmin}
     />
   );
 }

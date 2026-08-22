@@ -173,7 +173,9 @@ header.top{display:flex;align-items:center;gap:10px;padding:14px 16px 10px;flex:
 .row .s{color:var(--dim);font-size:12.5px;margin-top:2px}
 .row .s2{color:var(--dim2);font-size:11.5px;margin-top:5px;line-height:1.5}
 .badge{font-size:10px;font-weight:800;padding:3px 7px;border-radius:7px;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}
-.badge.m{background:rgba(61,111,240,.18);color:#bfd0fb;border:1px solid rgba(61,111,240,.3)}
+/* "m" is the attention badge — overdue, escalated, escalating. It must not
+   share a hue with the primary action colour, or urgent reads as ordinary. */
+.badge.m{background:rgba(184,85,103,.18);color:#efc0c8;border:1px solid rgba(184,85,103,.34)}
 .badge.s{background:rgba(91,140,255,.16);color:#c6d4f7;border:1px solid rgba(91,140,255,.3)}
 .badge.a{background:rgba(46,158,118,.16);color:#a8dcc8;border:1px solid rgba(46,158,118,.3)}
 .emptylist{text-align:center;color:var(--dim2);padding:44px 20px;font-size:13.5px;line-height:1.6}
@@ -197,8 +199,13 @@ header.top{display:flex;align-items:center;gap:10px;padding:14px 16px 10px;flex:
 .field select option{background:#151b25}
 .two{display:flex;gap:10px}
 .two>*{flex:1;min-width:0}
-.err{color:#bfd0fb;font-size:12.5px;margin-top:10px;background:rgba(61,111,240,.1);
-  border:1px solid rgba(61,111,240,.25);border-radius:10px;padding:9px 11px;line-height:1.5}
+/* Errors take --no (the muted rose), never --brand. In the first version of the
+   new palette they inherited the brand colour, because the OLD theme's brand
+   was pink and the swap was mechanical — so a failed save and a helpful tip
+   became the same colour. An error that doesn't look like one is worse than an
+   ugly error. */
+.err{color:#efc0c8;font-size:12.5px;margin-top:10px;background:rgba(184,85,103,.12);
+  border:1px solid rgba(184,85,103,.3);border-radius:10px;padding:9px 11px;line-height:1.5}
 .ok{color:#a8dcc8;font-size:12.5px;margin-top:10px;background:rgba(46,158,118,.1);
   border:1px solid rgba(46,158,118,.25);border-radius:10px;padding:9px 11px;line-height:1.5}
 .divider{display:flex;align-items:center;gap:10px;margin:16px 0;color:var(--dim2);font-size:11.5px}

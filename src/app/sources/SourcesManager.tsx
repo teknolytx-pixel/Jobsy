@@ -178,7 +178,7 @@ export default function SourcesManager({ initial }: { initial: Source[] }) {
                       {s.lastJobCount} live · {s.totalImported} imported all-time · synced {when(s.lastRunAt)}
                     </div>
                     {s.lastError ? (
-                      <div className="s2" style={{ color: "#bfd0fb", display: "flex", gap: 6, alignItems: "flex-start" }}>
+                      <div className="s2" style={{ color: "var(--gold)", display: "flex", gap: 6, alignItems: "flex-start" }}>
                       <Icon name="alert" size={13} style={{ marginTop: 2 }} /> {s.lastError.slice(0, 120)}
                     </div>
                     ) : null}

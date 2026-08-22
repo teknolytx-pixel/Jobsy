@@ -25,10 +25,12 @@ export default function ProfileEditor({
   initial,
   linkedinLinked,
   linkedinAvailable,
+  isPlatformAdmin = false,
 }: {
   initial: Initial;
   linkedinLinked: boolean;
   linkedinAvailable: boolean;
+  isPlatformAdmin?: boolean;
 }) {
   const [f, setF] = useState({
     ...initial,
@@ -144,6 +146,13 @@ export default function ProfileEditor({
         {!linkedinLinked && linkedinAvailable ? (
           <a className="btn li" href="/api/auth/linkedin/start">
             in&nbsp;&nbsp;Connect LinkedIn
+          </a>
+        ) : null}
+
+        {/* ADMIN-005 / ADMIN-006 — the only link to the console anywhere. */}
+        {isPlatformAdmin ? (
+          <a className="btn ghost" href="/admin">
+            <Icon name="key" size={15} /> Admin console
           </a>
         ) : null}
 
