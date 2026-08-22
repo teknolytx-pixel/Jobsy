@@ -33,6 +33,13 @@ const Body = z.object({
   benefitsDescription: z.string().max(4000).nullable().optional(),
   description: z.string().min(20),
   skills: z.array(z.string()).max(30).optional(),
+  /**
+   * MATCH-002 — the recruiter's own split. Both optional: a posting that states
+   * neither behaves exactly as it did before, with the split inferred from the
+   * description.
+   */
+  requiredSkills: z.array(z.string()).max(20).optional(),
+  preferredSkills: z.array(z.string()).max(20).optional(),
   perks: z.array(z.string()).max(10).optional(),
   applyMethod: z.enum(["EASY", "EXTERNAL"]).default("EASY"),
   applyUrl: z.string().url().optional().nullable(),
@@ -227,7 +234,24 @@ export async function POST(req: Request) {
       .onConflictDoUpdate({ target: companies.slug, set: { name: b.companyName } })
       .returning();
 
-    const skills = b.skills?.length ? normalizeSkills(b.skills) : extractSkills(b.description);
+    /**
+     * `skills` stays the union, because everything else in the product reads it
+     * — the card, the feed, search, and every job already in the table. The two
+     * authored lists are additional detail about the same set, not a
+     * replacement for it.
+     */
+    const required = normalizeSkills(b.requiredSkills ?? []);
+    // A skill stated in both lists is required. Saying "must have React, nice
+    // to have React" is a mistake rather than an instruction, and resolving it
+    // toward the stronger claim is the same rule the inferred path uses.
+    const preferred = normalizeSkills(b.preferredSkills ?? []).filter((s) => !required.includes(s));
+    const authored = [...required, ...preferred];
+
+    const skills = authored.length
+      ? authored
+      : b.skills?.length
+        ? normalizeSkills(b.skills)
+        : extractSkills(b.description);
 
     // ── FSD v1.1 §30 — resolve and validate the work location ──
     const country = toCountryCode(b.countryCode);
@@ -346,6 +370,8 @@ export async function POST(req: Request) {
         consentSource: "EMPLOYER_SUBMITTED",
         description: b.description,
         skills,
+        requiredSkills: required,
+        preferredSkills: preferred,
         perks: b.perks ?? [],
         applyMethod: b.applyMethod,
         applyUrl: b.applyUrl ?? null,
@@ -424,6 +450,8 @@ export async function POST(req: Request) {
         ok: true,
         jobId: job.id,
         skills,
+        requiredSkills: required,
+        preferredSkills: preferred,
         // LEGAL-002 AC-1 — tell the recruiter which rules applied, even on
         // success. Compliance the user cannot see reads as arbitrary friction.
         payLawsApplied: pay.applicable.map((a) => ({ scope: a.scope, cite: a.rule.cite })),

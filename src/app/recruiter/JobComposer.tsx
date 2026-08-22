@@ -23,6 +23,8 @@ export default function JobComposer({
     salaryMax: "",
     description: "",
     skills: "",
+    requiredSkills: "",
+    preferredSkills: "",
     applyMethod: "EASY" as "EASY" | "EXTERNAL",
     applyUrl: "",
     /** TRUST-001 — the ghost-jobs attestation. Required by the API. */
@@ -89,6 +91,8 @@ export default function JobComposer({
         salaryMax: f.salaryMax ? Number(f.salaryMax) : null,
         description: f.description,
         skills: f.skills.split(",").map((s) => s.trim()).filter(Boolean),
+        requiredSkills: f.requiredSkills.split(",").map((s) => s.trim()).filter(Boolean),
+        preferredSkills: f.preferredSkills.split(",").map((s) => s.trim()).filter(Boolean),
         applyMethod: f.applyMethod,
         applyUrl: f.applyMethod === "EXTERNAL" ? f.applyUrl : null,
         attestCurrentVacancy: f.attest,
@@ -209,9 +213,39 @@ export default function JobComposer({
           />
         </label>
 
+        {/*
+          MATCH-002 — two fields, because the engine has always scored them
+          differently and nobody could ever say which was which. Until now the
+          split was inferred by looking for "Requirements" and "Nice to have"
+          headings in the description; when that failed — which it usually does
+          — every skill listed became mandatory, and candidates who could do the
+          job ranked below candidates who could not.
+        */}
         <label className="field">
-          <span>Skills — leave blank to auto-extract from the description</span>
-          <input value={f.skills} onChange={(e) => set("skills", e.target.value)} placeholder="React, TypeScript, GraphQL" />
+          <span>Must have</span>
+          <input
+            value={f.requiredSkills}
+            onChange={(e) => set("requiredSkills", e.target.value)}
+            placeholder="React, TypeScript"
+          />
+        </label>
+        <div className="s2" style={{ color: "var(--dim2)", margin: "4px 2px 0", lineHeight: 1.5 }}>
+          Only what someone genuinely cannot do the job without. Every extra
+          entry here pushes down people who could do the work.
+        </div>
+
+        <label className="field">
+          <span>Nice to have</span>
+          <input
+            value={f.preferredSkills}
+            onChange={(e) => set("preferredSkills", e.target.value)}
+            placeholder="GraphQL, Figma"
+          />
+        </label>
+
+        <label className="field">
+          <span>Other skills — leave all three blank to auto-extract from the description</span>
+          <input value={f.skills} onChange={(e) => set("skills", e.target.value)} placeholder="Jest, Storybook" />
         </label>
 
         <label className="field">

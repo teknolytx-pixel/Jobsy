@@ -122,9 +122,39 @@ export function parseRequirements(job: {
   title: string;
   description: string;
   skills: string[];
+  /** MATCH-002 — what the recruiter actually said, when they said it. */
+  requiredSkills?: string[] | null;
+  preferredSkills?: string[] | null;
 }): Requirements {
   const text = job.description ?? "";
   const tagged = normalizeSkills(job.skills ?? []);
+
+  /**
+   * Authored beats inferred, always.
+   *
+   * Everything below this block is guesswork about prose — good guesswork, and
+   * still the only option for the ~980 jobs ingested from feeds. But when a
+   * recruiter has ticked "must have" against React and "nice to have" against
+   * GraphQL, reading their description to work that out is not just wasted
+   * effort, it is capable of contradicting them. A person who states a
+   * requirement should not be overruled by a heading parser.
+   */
+  const authoredRequired = normalizeSkills(job.requiredSkills ?? []);
+  if (authoredRequired.length) {
+    const req = new Set(authoredRequired);
+    // Stated in both lists — required wins, same rule as the inferred path.
+    const authoredPreferred = normalizeSkills(job.preferredSkills ?? []).filter((s) => !req.has(s));
+    return {
+      required: authoredRequired.slice(0, 12),
+      // Anything over the cap is demoted rather than dropped, so a recruiter
+      // who lists fifteen requirements still has all fifteen counted — just not
+      // all at full weight.
+      preferred: [...authoredPreferred, ...authoredRequired.slice(12)],
+      minYears: extractMinYears(text),
+      dealbreakers: extractDealbreakers(text),
+      structured: true,
+    };
+  }
 
   const requiredSection = sliceSection(text, REQUIRED_HEADINGS, [
     PREFERRED_HEADINGS,

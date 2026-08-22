@@ -121,6 +121,8 @@ export async function GET(req: Request) {
           title: row.job.title,
           description: row.job.description,
           skills: row.job.skills ?? [],
+          requiredSkills: row.job.requiredSkills,
+          preferredSkills: row.job.preferredSkills,
           location: row.job.location,
           remote: row.job.remote,
           salaryMin: row.job.salaryMin,

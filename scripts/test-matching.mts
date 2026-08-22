@@ -244,5 +244,82 @@ const extremes = [
 check("Score always within 1..99", extremes.every((r) => r.score >= 1 && r.score <= 99),
   extremes.map((r) => r.score).join(","));
 
+
+// ─────────────────────────────────────────────────────────────
+// MATCH-002 — the recruiter's own required/preferred split
+// ─────────────────────────────────────────────────────────────
+console.log("\nAUTHORED REQUIREMENTS\n");
+
+const authored = parseRequirements({
+  title: "Frontend Engineer",
+  // Prose that the heading parser would read the OTHER way round, on purpose.
+  description: "Requirements: GraphQL expertise essential. Nice to have: React.",
+  skills: ["React", "GraphQL"],
+  requiredSkills: ["React"],
+  preferredSkills: ["GraphQL"],
+});
+check("TC-REQ-40 a stated requirement is used", authored.required.join(",") === "React",
+  authored.required.join(","));
+check("TC-REQ-41 a stated preference is used", authored.preferred.join(",") === "GraphQL",
+  authored.preferred.join(","));
+check("TC-REQ-42 the description never overrides the recruiter",
+  !authored.required.includes("GraphQL"));
+check("TC-REQ-43 stating them counts as structured", authored.structured === true);
+
+const both = parseRequirements({
+  title: "X", description: "", skills: [],
+  requiredSkills: ["React"], preferredSkills: ["React", "Vue"],
+});
+check("TC-REQ-44 a skill in both lists is required, not duplicated",
+  both.required.join(",") === "React" && both.preferred.join(",") === "Vue",
+  `${both.required.join(",")} | ${both.preferred.join(",")}`);
+
+const many = parseRequirements({
+  title: "X", description: "", skills: [],
+  requiredSkills: Array.from({ length: 15 }, (_, i) => `Skill${i}`),
+});
+check("TC-REQ-45 over-long requirement lists are demoted, never dropped",
+  many.required.length === 12 && many.preferred.length === 3,
+  `${many.required.length} required, ${many.preferred.length} preferred`);
+
+// The reason this feature exists: with nothing stated and no parseable
+// headings, EVERY tagged skill became mandatory.
+const inferredStill = parseRequirements({
+  title: "Frontend Engineer",
+  description: "We build things. Come help.",
+  skills: ["React", "GraphQL"],
+});
+check("TC-REQ-46 with nothing stated, behaviour is unchanged",
+  inferredStill.required.length === 2 && inferredStill.structured === false,
+  `${inferredStill.required.join(",")} structured=${inferredStill.structured}`);
+check("TC-REQ-47 empty authored lists do not count as stated",
+  parseRequirements({ title: "X", description: "We build things.", skills: ["React"],
+    requiredSkills: [], preferredSkills: [] }).structured === false);
+
+// A nice-to-have must actually cost less than a must-have, or the split is
+// decorative.
+const reqJobBase = {
+  title: "Frontend Engineer", description: "Build the app.",
+  location: "Austin, TX", remote: "REMOTE" as const,
+  salaryMin: 120, salaryMax: 180, seniority: "Senior",
+};
+const reqCand = {
+  headline: "Frontend engineer", bio: "", skills: ["React"],
+  location: "Austin, TX", remotePref: "REMOTE" as const,
+  salaryTarget: 150, yearsExp: 8,
+};
+const asPreferred = matchScore(
+  { ...reqJobBase, skills: ["React", "Kubernetes"], requiredSkills: ["React"], preferredSkills: ["Kubernetes"] },
+  reqCand
+);
+const asRequired = matchScore(
+  { ...reqJobBase, skills: ["React", "Kubernetes"], requiredSkills: ["React", "Kubernetes"] },
+  reqCand
+);
+check("TC-REQ-48 missing a nice-to-have costs less than missing a must-have",
+  asPreferred.score > asRequired.score, `${asPreferred.score} vs ${asRequired.score}`);
+check("TC-REQ-49 the model version records the change",
+  asPreferred.modelVersion === "2026-08-22.a", asPreferred.modelVersion);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

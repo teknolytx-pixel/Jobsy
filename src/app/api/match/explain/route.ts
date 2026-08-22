@@ -56,6 +56,8 @@ export async function GET(req: Request) {
       title: found.job.title,
       description: found.job.description,
       skills: found.job.skills,
+      requiredSkills: found.job.requiredSkills,
+      preferredSkills: found.job.preferredSkills,
       location: found.job.location,
       remote: found.job.remote,
       salaryMin: found.job.salaryMin,

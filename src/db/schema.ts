@@ -368,7 +368,34 @@ export const jobs = pgTable(
     currency: varchar("currency", { length: 8 }).notNull().default("USD"),
 
     description: text("description").notNull(),
+    /**
+     * The union of required + preferred, kept as the general-purpose skill list.
+     *
+     * Every existing query, the RSS feed, the card UI and every ingested job
+     * reads this. It stays authoritative for "what is this job about"; the two
+     * columns below say how strongly each one is wanted.
+     */
     skills: text("skills").array().notNull().default([]),
+    /**
+     * MATCH-002 — required vs preferred, as the recruiter STATED them.
+     *
+     * The match engine has always weighted these differently — 40 points against
+     * 12 — but nobody could ever say which was which. `parseRequirements()`
+     * inferred the split by looking for headings like "Requirements" and
+     * "Nice to have" in the description prose, and reported `structured: false`
+     * when it found none, which is most of the time: aggregator feeds truncate
+     * the body, and plenty of recruiters write a paragraph rather than a list.
+     *
+     * When that inference fails, EVERY tagged skill becomes required. A posting
+     * that mentions Kubernetes as a nice-to-have then scores candidates as
+     * though it were mandatory, and people who could do the job rank below
+     * people who cannot.
+     *
+     * Empty means "not stated" — inference still runs, exactly as before. These
+     * are additive, so every job already in the table keeps working.
+     */
+    requiredSkills: text("required_skills").array().notNull().default([]),
+    preferredSkills: text("preferred_skills").array().notNull().default([]),
     perks: text("perks").array().notNull().default([]),
 
     applyMethod: applyMethodEnum("apply_method").notNull().default("EXTERNAL"),

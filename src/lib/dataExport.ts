@@ -136,6 +136,8 @@ export async function buildExport(user: User): Promise<ExportBundle> {
         title: job.title,
         description: job.description,
         skills: job.skills,
+        requiredSkills: job.requiredSkills,
+        preferredSkills: job.preferredSkills,
         location: job.location,
         remote: job.remote,
         salaryMin: job.salaryMin,

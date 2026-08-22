@@ -27,6 +27,9 @@ type JobLike = {
   title?: string;
   description?: string;
   skills: string[];
+  /** MATCH-002 — optional, because ingested jobs never have them. */
+  requiredSkills?: string[] | null;
+  preferredSkills?: string[] | null;
   location: string;
   remote: RemotePref;
   salaryMin: number | null;
@@ -50,6 +53,8 @@ export function scoreJobForCandidate(job: JobLike, cand: CandLike): ScoreResult 
       title: job.title ?? "",
       description: job.description ?? "",
       skills: job.skills,
+      requiredSkills: job.requiredSkills,
+      preferredSkills: job.preferredSkills,
       location: job.location,
       remote: job.remote,
       salaryMin: job.salaryMin,

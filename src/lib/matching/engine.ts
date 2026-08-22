@@ -60,7 +60,14 @@ import { parseRequirements, type Dealbreaker, type Requirements } from "./requir
  * that the model is versioned, making that change is a traceable event rather
  * than a silent edit.
  */
-export const MODEL_VERSION = "2026-08-21.a";
+/**
+ * 2026-08-22.a — required vs preferred may now be STATED by the recruiter
+ * rather than inferred from the description prose. For any posting that states
+ * them, the split feeding the 40-point and 12-point blocks changes, so scores
+ * change. That is a new model by the rule three paragraphs above, and this is
+ * the first time that rule has been exercised.
+ */
+export const MODEL_VERSION = "2026-08-22.a";
 
 export const WEIGHTS = {
   requiredSkills: 40,
@@ -77,6 +84,15 @@ export type JobInput = {
   title: string;
   description: string;
   skills: string[];
+  /**
+   * MATCH-002 — the authored split, when the recruiter provided one.
+   *
+   * Optional because most jobs in the table are ingested from feeds and will
+   * never have it. Absent means the requirements parser infers the split from
+   * the description exactly as it always has.
+   */
+  requiredSkills?: string[] | null;
+  preferredSkills?: string[] | null;
   location: string;
   remote: RemotePref;
   salaryMin: number | null;
