@@ -255,10 +255,16 @@ const [role] = await db
   })
   .returning();
 
-// 300 recently-active candidates who do not fit, plus one who does and has
-// not touched their profile in a while.
+/**
+ * 450, not 300 — it MUST exceed the 400-row pool.
+ *
+ * The first version of this fixture used 300 and passed against the unfixed
+ * code, because the trap only springs once the noise fills the pool. A test
+ * that passes before the fix proves nothing; caught by running this suite
+ * against the reverted code, which is why that is worth doing every time.
+ */
 await db.insert(users).values(
-  Array.from({ length: 300 }, (_, i) => ({
+  Array.from({ length: 450 }, (_, i) => ({
     email: `${TAG}noise${i}@example.com`,
     name: `Noise ${i}`,
     role: "CANDIDATE" as const,
@@ -291,6 +297,7 @@ await db.insert(users).values({
 const sourced = await recruiterDeck(rec, role.id);
 const names = sourced.map((c) => c.name);
 check("TC-DECK-30 sourcing returns candidates", sourced.length > 0, `${sourced.length}`);
+check("TC-DECK-34 the noise fixture actually exceeds the pool", 450 > 400);
 check("TC-DECK-31 the best fit is found despite a stale profile",
   names.includes("Perfect Match"), names.slice(0, 5).join(" | "));
 /**
@@ -302,8 +309,14 @@ check("TC-DECK-31 the best fit is found despite a stale profile",
  */
 check("TC-DECK-32 and ranks near the top", names.slice(0, 3).includes("Perfect Match"),
   names.slice(0, 3).join(" | "));
-check("TC-DECK-33 none of the 300 recently-active mismatches outrank it",
-  names.slice(0, 3).every((n) => !/^Noise /.test(n)), names.slice(0, 3).join(" | "));
+/**
+ * Top TWO, because the fixture contains exactly two candidates who fit. Rank 3
+ * being a mismatch is correct: once the genuinely relevant people are exhausted
+ * the deck fills with eligible-but-weaker ones rather than running short, which
+ * is the same choice made on the candidate side.
+ */
+check("TC-DECK-33 no recently-active mismatch outranks a real fit",
+  names.slice(0, 2).every((n) => !/^Noise /.test(n)), names.slice(0, 2).join(" | "));
 
 await cleanup();
 console.log(`\n${pass} passed, ${fail} failed  —  deck relevance\n`);

@@ -13,3 +13,6 @@ node_modules/
 
 # Local resume storage used when BLOB_READ_WRITE_TOKEN is unset.
 /tmp-resumes/
+
+# Stale git lock files parked here — the desktop mount cannot delete files.
+_to_delete/
