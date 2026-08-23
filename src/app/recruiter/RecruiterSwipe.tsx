@@ -16,6 +16,7 @@ type CandCard = {
   skills: string[]; image: string | null; linkedinVerified: boolean;
   score: number; sharedSkills: string[]; missingSkills: string[]; reasons: string[];
   tier: "STRONG" | "BELOW_BAR";
+  confidence: { score: number; band: "HIGH" | "MEDIUM" | "LOW"; improve: string[] };
 };
 
 type JobLite = { id: string; title: string; company: string; location: string; applyMethod: string };
@@ -144,6 +145,21 @@ export default function RecruiterSwipe({
             </div>
           ) : null}
           {c.reasons.length ? <div className="why">{c.reasons.join(" · ")}</div> : null}
+          {/*
+            Confidence, beside the score and never inside it.
+            A recruiter reading 78% deserves to know whether it rests on a full
+            profile or on defaults — and a LOW reading is a prompt to look
+            closer, not a reason to skip.
+          */}
+          <div className={`conf ${c.confidence.band.toLowerCase()}`} title={c.confidence.improve.join(" · ")}>
+            <span className="conf-dot" aria-hidden="true" />
+            {c.confidence.band === "HIGH"
+              ? "Well evidenced"
+              : c.confidence.band === "MEDIUM"
+                ? "Partly inferred"
+                : "Mostly inferred"}
+            <span className="conf-n">{c.confidence.score}%</span>
+          </div>
         </div>
 
         <div className="sect">

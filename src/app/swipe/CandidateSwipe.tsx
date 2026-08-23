@@ -16,6 +16,7 @@ type JobCard = {
   source: string; sourceUrl: string | null; recruiterName: string | null;
   score: number; sharedSkills: string[]; missingSkills: string[]; reasons: string[];
   tier: "STRONG" | "BELOW_BAR";
+  confidence: { score: number; band: "HIGH" | "MEDIUM" | "LOW"; improve: string[] };
 };
 
 type ApplyState =
@@ -179,6 +180,21 @@ export default function CandidateSwipe({
             </div>
           ) : null}
           {j.reasons.length ? <div className="why">{j.reasons.join(" · ")}</div> : null}
+          {/*
+            Confidence, beside the score and never inside it.
+            A recruiter reading 78% deserves to know whether it rests on a full
+            profile or on defaults — and a LOW reading is a prompt to look
+            closer, not a reason to skip.
+          */}
+          <div className={`conf ${j.confidence.band.toLowerCase()}`} title={j.confidence.improve.join(" · ")}>
+            <span className="conf-dot" aria-hidden="true" />
+            {j.confidence.band === "HIGH"
+              ? "Well evidenced"
+              : j.confidence.band === "MEDIUM"
+                ? "Partly inferred"
+                : "Mostly inferred"}
+            <span className="conf-n">{j.confidence.score}%</span>
+          </div>
         </div>
 
         {j.skills.length ? (

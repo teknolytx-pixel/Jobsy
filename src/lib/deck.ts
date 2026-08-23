@@ -15,6 +15,7 @@ import { isSponsorshipEligible } from "./authorization";
 import { expandSkills, toSqlArrays } from "./matching/expansion";
 import { bestCredit } from "./matching/taxonomy";
 import { MIN_MATCH, tierFor, type MatchTier } from "./matching/engine";
+import type { ConfidenceBand } from "./matching/confidence";
 import { normalizeSkills } from "./skills";
 
 export type JobCard = {
@@ -39,6 +40,13 @@ export type JobCard = {
    * a quiet week from a broken product.
    */
   tier: MatchTier;
+  /**
+   * How much this score rests on evidence rather than defaults.
+   *
+   * Carried beside the score, never folded into it — ordering by it would rank
+   * people on how complete their profile is, which is not merit.
+   */
+  confidence: { score: number; band: ConfidenceBand; improve: string[] };
 };
 
 export type CandidateCard = {
@@ -67,6 +75,13 @@ export type CandidateCard = {
   requestedCoverage: number;
   /** MATCH-040 — see JobCard.tier. Below-bar candidates rank last, never hidden. */
   tier: MatchTier;
+  /**
+   * How much this score rests on evidence rather than defaults.
+   *
+   * Carried beside the score, never folded into it — ordering by it would rank
+   * people on how complete their profile is, which is not merit.
+   */
+  confidence: { score: number; band: ConfidenceBand; improve: string[] };
 };
 
 const DECK_SIZE = 25;
@@ -262,6 +277,11 @@ export async function candidateDeck(candidate: User): Promise<JobCard[]> {
         transferable: fit.full.transferableSkills.map((t) => ({ skill: t.skill, via: t.via })),
         qualification: fit.full.qualification,
         tier: tierFor(fit.score),
+        confidence: {
+          score: fit.full.confidence.score,
+          band: fit.full.confidence.band,
+          improve: fit.full.confidence.improve.map((x) => x.note),
+        },
       };
     })
     // A hard filter means "don't show this", not "show it last" — an onsite job
@@ -571,6 +591,11 @@ export async function recruiterDeck(
         requested,
         requestedCoverage,
         tier: tierFor(fit.score),
+        confidence: {
+          score: fit.full.confidence.score,
+          band: fit.full.confidence.band,
+          improve: fit.full.confidence.improve.map((x) => x.note),
+        },
       };
     })
     .filter((c) => !c._excluded)

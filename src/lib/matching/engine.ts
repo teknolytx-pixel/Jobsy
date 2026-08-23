@@ -9,6 +9,7 @@ import {
   type RoleFamily,
 } from "./taxonomy";
 import { parseRequirements, type Dealbreaker, type Requirements } from "./requirements";
+import { confidenceFor, type ConfidenceResult } from "./confidence";
 
 /**
  * THE MATCH ENGINE
@@ -202,6 +203,14 @@ export type JobInput = {
   salaryMin: number | null;
   salaryMax: number | null;
   seniority: string;
+  /**
+   * Read only by the confidence pass, never by the scorer.
+   *
+   * Optional so no existing caller breaks; absent is read as "not stated",
+   * which is the truthful default — a caller that does not pass it genuinely
+   * has not told us.
+   */
+  sponsorshipAvailable?: boolean | null;
 };
 
 export type CandidateInput = {
@@ -286,6 +295,13 @@ export type MatchResult = {
   };
   /** Kept for the older callers that expect these four keys. */
   requirements: Requirements;
+  /**
+   * How much of this score rests on evidence rather than defaults.
+   *
+   * Reported beside the score and deliberately never folded into it — see
+   * confidence.ts for why ranking on profile completeness would be unjust.
+   */
+  confidence: ConfidenceResult;
 };
 
 const metro = (s: string | null | undefined): string =>
@@ -551,6 +567,39 @@ export function matchScore(job: JobInput, cand: CandidateInput): MatchResult {
   // filter that will eventually be ignored by some caller and leak through.
   const score = exclusion ? Math.min(rawScore, 5) : rawScore;
 
+  /**
+   * Computed LAST, from the finished result, and fed back into nothing.
+   *
+   * Its position here is the guarantee: every number above is already final by
+   * the time confidence is calculated, so it is structurally incapable of
+   * moving one.
+   */
+  const confidence = confidenceFor({
+    candidate: {
+      skillCount: cand.skills?.length ?? 0,
+      hasHeadline: Boolean(cand.headline?.trim()),
+      hasBio: Boolean(cand.bio?.trim()),
+      yearsExpStated: (cand.yearsExp ?? 0) > 0,
+      salaryTargetStated: cand.salaryTarget != null,
+      locationStated: Boolean(cand.location?.trim()),
+    },
+    job: {
+      requirementsStructured: reqs.structured,
+      skillsAuthored: Boolean(job.requiredSkills?.length),
+      salaryStated: job.salaryMin != null || job.salaryMax != null,
+      minYearsStated: reqs.minYears != null,
+      sponsorshipStated: job.sponsorshipAvailable != null,
+      locationResolved: Boolean(job.location?.trim()),
+    },
+    match: {
+      exactHits: exact.length,
+      transferableHits: transferable.length,
+      requiredCount: reqs.required.length,
+      jobFamily,
+      candidateFamily,
+    },
+  });
+
   return {
     modelVersion: MODEL_VERSION,
     score,
@@ -576,6 +625,7 @@ export function matchScore(job: JobInput, cand: CandidateInput): MatchResult {
       workStyle: Math.round(workPts),
     },
     requirements: reqs,
+    confidence,
   };
 }
 
