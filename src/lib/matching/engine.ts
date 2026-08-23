@@ -241,7 +241,28 @@ export type MatchResult = {
   exclusionReason: string | null;
 
   sharedSkills: string[];
+  /**
+   * MAT-006 / GAP-003 — REQUIRED skills the candidate does not have.
+   *
+   * Kept as the must-have list specifically, because a gap report that mixes
+   * "you are missing a mandatory skill" with "you are missing a nice-to-have"
+   * gives a candidate no way to know which one is worth doing something about.
+   */
   missingSkills: string[];
+  /**
+   * MAT-006 / GAP-001 — PREFERRED skills the candidate does not have.
+   *
+   * This was computed and then discarded: `missingSkills` was set to the
+   * required misses and `pref.missing` went nowhere, so every downstream
+   * consumer — the explanation endpoint, the gap report, the recruiter card —
+   * was structurally unable to distinguish a must-have gap from a
+   * nice-to-have one, however carefully it tried.
+   *
+   * Deliberately a SEPARATE field rather than merged in. Merging is what the
+   * spec asks us not to do, and a caller that wants everything can concatenate;
+   * a caller handed one merged list can never recover the split.
+   */
+  missingPreferredSkills: string[];
   /** Skills earned through adjacency rather than an exact match. */
   transferableSkills: SkillHit[];
 
@@ -538,6 +559,7 @@ export function matchScore(job: JobInput, cand: CandidateInput): MatchResult {
     exclusionReason: exclusion,
     sharedSkills: [...exact.map((h) => h.skill), ...pref.hits.filter((h) => h.credit === 1).map((h) => h.skill)],
     missingSkills: req.missing,
+    missingPreferredSkills: pref.missing,
     transferableSkills: transferable,
     reasons: exclusion ? [exclusion] : reasons.slice(0, 3),
     concerns: concerns.slice(0, 3),

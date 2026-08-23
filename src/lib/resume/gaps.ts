@@ -94,6 +94,27 @@ export function gapReport(m: MatchResult, jobTitle: string): GapReport {
   }
 
   /**
+   * GAP-001/GAP-003 — a missing NICE-TO-HAVE is a different thing.
+   *
+   * Always MINOR, never blocking, and worded so the candidate can tell it apart
+   * from a real requirement. Before this, preferred misses never reached the
+   * report at all, so a candidate saw an undifferentiated list and could not
+   * tell which item was actually costing them.
+   */
+  // `?? []` because gapReport takes a structurally-typed result and callers
+  // (including tests) legitimately hand-build one. A missing optional list
+  // should mean "no preferred gaps", not a crash halfway through a report.
+  for (const s of m.missingPreferredSkills ?? []) {
+    gaps.push({
+      severity: "MINOR",
+      skill: s,
+      title: `${title(s)} is listed as a nice-to-have`,
+      detail: `The ${jobTitle} posting mentions ${title(s)} as preferred rather than required. Not having it does not rule you out.`,
+      action: `Worth adding if you have it — it lifts your ranking. Not worth learning for this application alone.`,
+    });
+  }
+
+  /**
    * Engine concerns are about fit — compensation, work model, seniority — and
    * are passed through nearly verbatim. They are not resume problems and must
    * not be dressed up as ones: no amount of rewriting fixes a salary band.

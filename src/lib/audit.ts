@@ -56,6 +56,9 @@ export type AuditAction =
   | "company.member_joined"
   | "company.member_removed"
   | "job.created"
+  // JOB-008 — a posting read from a URL, paste or document. Records that an
+  // import happened and how much of it resolved; never the posting text.
+  | "job.imported"
   | "job.updated"
   /**
    * RESUME-003 AC-4 — a parser wrote to someone's profile.

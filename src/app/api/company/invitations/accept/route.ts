@@ -100,6 +100,40 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "That company no longer exists" }, { status: 404 });
   }
 
+  /**
+   * CAN-001 / AUTH-002 — a candidate account cannot take a recruiter seat.
+   *
+   * This was missing, and it punched a hole straight through the permission
+   * model. The membership row was written with `role: me.role`, preserving
+   * whatever the accepting account already was — so a CANDIDATE who was sent
+   * (or forwarded) an invitation became a company member, appeared in seat
+   * counts, and held a seatRole of RECRUITER or COMPANY_ADMIN while still
+   * being a candidate everywhere else. Every "is this person a recruiter"
+   * check in the codebase asks `users.role`, and every "may they act for this
+   * company" check asks the membership. Those two answers are supposed to
+   * agree.
+   *
+   * Refused rather than upgraded: the account type is chosen once at signup
+   * and is deliberately permanent, precisely so nobody sits on both sides of
+   * the same hire. Silently promoting someone here would be the one code path
+   * that undoes that.
+   *
+   * Checked BEFORE the invitation is consumed, so a wrongly-addressed
+   * invitation stays valid for the right person.
+   */
+  if (me.role !== "RECRUITER") {
+    return NextResponse.json(
+      {
+        error:
+          "This invitation is for a hiring seat, and you're signed in with a job seeker account. " +
+          "Account type is set at signup and can't be changed — sign in with a recruiter account, " +
+          "or ask the admin to invite that address instead.",
+        code: "WRONG_ACCOUNT_TYPE",
+      },
+      { status: 403 }
+    );
+  }
+
   // Re-check the seat limit at ACCEPT time, not only at invite time. Seats can
   // fill between the two, and an invitation is not a reservation.
   if ((await seatsUsed(company.id)) >= company.seatLimit) {

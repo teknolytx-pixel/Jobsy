@@ -215,6 +215,9 @@ const match: MatchResult = {
   exclusionReason: null,
   sharedSkills: ["python", "postgresql"],
   missingSkills: ["kubernetes"],
+  // MAT-006 — a nice-to-have the candidate lacks. Distinct from the must-have
+  // above, and the whole point of the two lists being separate.
+  missingPreferredSkills: ["terraform"],
   transferableSkills: [{ skill: "react", credit: 0.6, via: "vue", required: true }],
   reasons: [],
   concerns: ["This role's band tops out below your target."],
@@ -233,6 +236,22 @@ check("TC-RG-04 it is phrased about the profile, not the person",
   /isn't in your profile/i.test(k.title) && !/you lack|unqualified/i.test(k.detail),
   k.title);
 check("TC-RG-05 and it offers an action", (k.action ?? "").length > 20);
+
+/**
+ * MAT-006 / GAP-001 — a nice-to-have gap is reported, and reported DIFFERENTLY.
+ *
+ * Before this, `pref.missing` was computed by the engine and discarded, so a
+ * candidate saw one undifferentiated list and could not tell which absence was
+ * actually costing them the role.
+ */
+const pref = report.gaps.find((g) => g.skill === "terraform");
+check("TC-RG-30 a preferred-skill gap is reported at all", Boolean(pref),
+  report.gaps.map((g) => `${g.skill}:${g.severity}`).join(" | "));
+check("TC-RG-31 and never as blocking", pref?.severity === "MINOR", pref?.severity ?? "—");
+check("TC-RG-32 the required gap still outranks it",
+  k.severity !== "MINOR", `${k.skill}=${k.severity} vs ${pref?.skill}=${pref?.severity}`);
+check("TC-RG-33 and it says plainly that it does not rule them out",
+  /does not rule you out|not required|preferred/i.test(pref?.detail ?? ""), pref?.detail ?? "—");
 check("TC-RG-06 a transferable skill explains what earned the credit",
   report.gaps.some((g) => g.skill === "react" && /Vue/i.test(g.detail)));
 check("TC-RG-07 an engine concern is passed through with no action invented",

@@ -43,6 +43,8 @@ export type Explanation = {
     /** Credited through a related skill, naming which one earned it. */
     transferable: { skill: string; via: string | null; note: string }[];
     missing: string[];
+    /** MAT-006 — nice-to-haves the candidate lacks, kept apart from must-haves. */
+    missingPreferred: string[];
   };
   reasons: string[];
   concerns: string[];
@@ -131,6 +133,7 @@ export function explain(r: MatchResult): Explanation {
           : `Partially credited toward ${t.skill}.`,
       })),
       missing: r.missingSkills,
+      missingPreferred: r.missingPreferredSkills,
     },
     reasons: r.reasons,
     concerns: r.concerns,
@@ -213,7 +216,12 @@ export function explanationToText(e: Explanation, context: { jobTitle: string; c
     for (const t of e.skills.transferable) lines.push(`  ${t.note}`);
   }
   if (e.skills.missing.length) {
-    lines.push(`WHAT THE ROLE ASKS FOR THAT ISN'T ON YOUR PROFILE: ${e.skills.missing.join(", ")}`);
+    lines.push(`REQUIRED SKILLS NOT ON YOUR PROFILE: ${e.skills.missing.join(", ")}`);
+  }
+  // Reported separately and named as optional, because a candidate reading a
+  // flat list has no way to tell which absence actually cost them the ranking.
+  if (e.skills.missingPreferred.length) {
+    lines.push(`NICE-TO-HAVES NOT ON YOUR PROFILE (these do not exclude you): ${e.skills.missingPreferred.join(", ")}`);
   }
   lines.push("");
 

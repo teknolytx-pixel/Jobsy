@@ -1,0 +1,339 @@
+<title>Jobsy FSD Conformance</title>
+<style>
+  :root{
+    --bg:#f7f8fa; --panel:#fff; --ink:#12161f; --dim:#5b6478; --dim2:#8a92a6;
+    --line:#e4e7ee; --d:#1f8a5f; --dbg:#e7f5ee; --p:#a06a12; --pbg:#fbf2e0;
+    --m:#b23c4b; --mbg:#fdecee; --x:#5a5f6e; --xbg:#eef0f4; --accent:#2f5fd0;
+  }
+  :root:not([data-theme="light"]) { }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0d1016; --panel:#141922; --ink:#e8ecf4; --dim:#9aa3b6; --dim2:#6c7488;
+      --line:#232a36; --d:#5fd6a0; --dbg:#12291f; --p:#e0b45f; --pbg:#2a2313;
+      --m:#f0909e; --mbg:#2c1519; --x:#9aa3b6; --xbg:#1b202a; --accent:#7aa2ff;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0d1016; --panel:#141922; --ink:#e8ecf4; --dim:#9aa3b6; --dim2:#6c7488;
+    --line:#232a36; --d:#5fd6a0; --dbg:#12291f; --p:#e0b45f; --pbg:#2a2313;
+    --m:#f0909e; --mbg:#2c1519; --x:#9aa3b6; --xbg:#1b202a; --accent:#7aa2ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:900px;margin:0 auto;padding:40px 20px 80px}
+  h1{font-size:30px;letter-spacing:-.7px;margin:0 0 6px}
+  .sub{color:var(--dim);margin:0 0 28px;font-size:15px}
+  h2{font-size:19px;letter-spacing:-.3px;margin:38px 0 10px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:14px;letter-spacing:.02em;margin:26px 0 8px;display:flex;align-items:baseline;gap:10px}
+  .cnt{font-size:12px;font-weight:500;color:var(--dim2)}
+  p{margin:0 0 12px;color:var(--dim)}
+  p.lead{color:var(--ink)}
+  .scores{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin:0 0 8px}
+  .score{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .score b{display:block;font-size:26px;letter-spacing:-.6px;line-height:1.1}
+  .score span{font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim2);font-weight:600}
+  .score.d b{color:var(--d)} .score.p b{color:var(--p)} .score.m b{color:var(--m)}
+  table{width:100%;border-collapse:collapse;background:var(--panel);
+    border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:13.5px}
+  td{padding:8px 12px;border-top:1px solid var(--line);vertical-align:top}
+  tr:first-child td{border-top:0}
+  td.id{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--dim2);white-space:nowrap;width:1%}
+  td.st{white-space:nowrap;width:1%}
+  .pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700}
+  .pill.d{background:var(--dbg);color:var(--d)}
+  .pill.p{background:var(--pbg);color:var(--p)}
+  .pill.m{background:var(--mbg);color:var(--m)}
+  .pill.x{background:var(--xbg);color:var(--x)}
+  .new{font-size:10px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;margin-left:5px}
+  ul{margin:0 0 14px;padding-left:20px;color:var(--dim)}
+  li{margin:5px 0}
+  li b,p b{color:var(--ink)}
+  .box{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);
+    border-radius:8px;padding:14px 16px;margin:14px 0}
+  .box.warn{border-left-color:var(--m)}
+  .box h4{margin:0 0 6px;font-size:14px}
+  .scroll{overflow-x:auto}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;
+    background:var(--xbg);padding:1px 5px;border-radius:4px}
+</style>
+
+<div class="wrap">
+<h1>Jobsy — functional specification conformance</h1>
+<p class="sub">All 142 requirements in FSD v1.0, checked against the code rather than against comments.</p>
+
+<div class="scores">
+  <div class="score d"><b>104</b><span>Done</span></div>
+  <div class="score p"><b>32</b><span>Partial</span></div>
+  <div class="score m"><b>5</b><span>Not built</span></div>
+  <div class="score"><b>1</b><span>Declined</span></div>
+</div>
+<p style="font-size:13px">Every requirement was verified by locating the implementing code and its test. A requirement
+whose ID appears in a comment was <em>not</em> counted as done on that basis — most features here are implemented
+without the ID annotated, and a few annotated ones were incomplete.</p>
+
+<h2>What changed in this round</h2>
+<p class="lead">Six things, four of them gaps in the spec and two found while looking.</p>
+<ul>
+  <li><b>Job import</b> — a recruiter can paste a URL, paste a description, or upload a PDF or Word file, and get an
+    editable draft back. Closes JOB-002, JOB-008, JOB-009, REC-007 and AC-003.</li>
+  <li><b>Preferred-skill gaps</b> — the engine computed which nice-to-haves were missing and then discarded the list,
+    so nothing downstream could tell a must-have gap from a nice-to-have one. Closes MAT-006 and GAP-001.</li>
+  <li><b>Candidate contact privacy</b> — not in the spec. Any signed-in account could read any candidate's email
+    address by visiting their profile URL.</li>
+  <li><b>Seat role enforcement</b> — not in the spec. A job-seeker account could accept a recruiter invitation and
+    become a company member while still being a candidate.</li>
+</ul>
+
+<div class="box warn">
+  <h4>Two security bugs, neither of them a spec item</h4>
+  <p style="margin:0">The email exposure is the one worth acting on quickly. <code>/u/&lt;id&gt;</code> required only that
+  the viewer be signed in, so any account could walk profile IDs and collect email addresses, salary targets and
+  "quietly open to offers" flags. Access is now limited to the candidate themselves, a recruiter they have applied to,
+  and either party to a mutual match.</p>
+</div>
+
+<h2>Every requirement</h2>
+<div class="scroll"><h3>Authentication &amp; access <span class="cnt">7/8 done</span></h3><table><tbody>
+<tr class="p"><td class="id">AUTH-001</td><td class="st"><span class="pill p">Partial</span></td><td>One shared /login with the account type chosen at signup; no separate candidate and recruiter entry points</td></tr>
+<tr class="d"><td class="id">AUTH-002</td><td class="st"><span class="pill d">Done</span></td><td>Candidates cannot create or post jobs, enforced server-side</td></tr>
+<tr class="d"><td class="id">AUTH-003</td><td class="st"><span class="pill d">Done</span></td><td>Role-scoped access on every deck, swipe and resume route</td></tr>
+<tr class="d"><td class="id">AUTH-004</td><td class="st"><span class="pill d">Done</span></td><td>Company-admin permissions enforced in the API, not the UI</td></tr>
+<tr class="d"><td class="id">AUTH-005</td><td class="st"><span class="pill d">Done</span></td><td>Email verification required before acting</td></tr>
+<tr class="d"><td class="id">AUTH-006</td><td class="st"><span class="pill d">Done</span></td><td>Reset, session revocation and two-phase deactivation</td></tr>
+<tr class="d"><td class="id">AUTH-007</td><td class="st"><span class="pill d">Done</span></td><td>One account per email; LinkedIn links rather than forks</td></tr>
+<tr class="d"><td class="id">AUTH-008</td><td class="st"><span class="pill d">Done</span></td><td>Uniform 401/403, generic login errors, constant-time compare</td></tr>
+</tbody></table>
+<h3>Organisations &amp; seats <span class="cnt">6/9 done</span></h3><table><tbody>
+<tr class="d"><td class="id">ORG-001</td><td class="st"><span class="pill d">Done</span></td><td>Company creation seats the creator as admin in one transaction</td></tr>
+<tr class="d"><td class="id">ORG-002</td><td class="st"><span class="pill d">Done</span></td><td>Hashed invitation tokens, 7-day expiry, single use</td></tr>
+<tr class="d"><td class="id">ORG-003</td><td class="st"><span class="pill d">Done</span></td><td>Seat limit enforced at invite and again at accept</td></tr>
+<tr class="p"><td class="id">ORG-004</td><td class="st"><span class="pill p">Partial</span></td><td>No way to raise a seat limit except editing the database</td></tr>
+<tr class="p"><td class="id">ORG-005</td><td class="st"><span class="pill p">Partial</span></td><td>Invitation status is an API only; no screen shows it</td></tr>
+<tr class="p"><td class="id">ORG-006</td><td class="st"><span class="pill p">Partial</span></td><td>Revoke and resend exist as endpoints with no UI and no test</td></tr>
+<tr class="d"><td class="id">ORG-007</td><td class="st"><span class="pill d">Done</span></td><td>Member removal with a last-admin guard and session revoke</td></tr>
+<tr class="d"><td class="id">ORG-008</td><td class="st"><span class="pill d">Done</span></td><td>Removing a member reassigns their jobs rather than orphaning them</td></tr>
+<tr class="d"><td class="id">ORG-009</td><td class="st"><span class="pill d">Done</span></td><td>Every company route checks membership before acting</td></tr>
+</tbody></table>
+<h3>Administration <span class="cnt">2/5 done</span></h3><table><tbody>
+<tr class="p"><td class="id">ADM-001</td><td class="st"><span class="pill p">Partial</span></td><td>Report moderation only; no user, company or job administration</td></tr>
+<tr class="p"><td class="id">ADM-002</td><td class="st"><span class="pill p">Partial</span></td><td>Reactive queue; the audit log is written but never readable</td></tr>
+<tr class="p"><td class="id">ADM-003</td><td class="st"><span class="pill p">Partial</span></td><td>Matching events are not audited; several declared actions never fire</td></tr>
+<tr class="d"><td class="id">ADM-004</td><td class="st"><span class="pill d">Done</span></td><td>Jobs close and accounts suspend without destroying history</td></tr>
+<tr class="d"><td class="id">ADM-005</td><td class="st"><span class="pill d">Done</span></td><td>Protected-characteristic filters blocked, with a build-failing CI guard</td></tr>
+</tbody></table>
+<h3>Jobs <span class="cnt">8/10 done</span></h3><table><tbody>
+<tr class="d"><td class="id">JOB-001</td><td class="st"><span class="pill d">Done</span></td><td>Only recruiters can create postings</td></tr>
+<tr class="d"><td class="id">JOB-002</td><td class="st"><span class="pill d">Done</span> <span class="new">new</span></td><td>Manual, URL, pasted text and uploaded document</td></tr>
+<tr class="d"><td class="id">JOB-003</td><td class="st"><span class="pill d">Done</span></td><td>Title, description, location, work model, employment type</td></tr>
+<tr class="d"><td class="id">JOB-004</td><td class="st"><span class="pill d">Done</span></td><td>Required and preferred skills stored separately</td></tr>
+<tr class="p"><td class="id">JOB-005</td><td class="st"><span class="pill p">Partial</span></td><td>Experience is inferred from the text; the recruiter cannot state it</td></tr>
+<tr class="p"><td class="id">JOB-006</td><td class="st"><span class="pill p">Partial</span></td><td>Salary range works, but currency is fixed to USD</td></tr>
+<tr class="d"><td class="id">JOB-007</td><td class="st"><span class="pill d">Done</span></td><td>Sponsorship as a three-state field, never inferred</td></tr>
+<tr class="d"><td class="id">JOB-008</td><td class="st"><span class="pill d">Done</span> <span class="new">new</span></td><td>URL and pasted text parsed into structured fields</td></tr>
+<tr class="d"><td class="id">JOB-009</td><td class="st"><span class="pill d">Done</span> <span class="new">new</span></td><td>Draft returned for review; nothing is written until submitted</td></tr>
+<tr class="d"><td class="id">JOB-010</td><td class="st"><span class="pill d">Done</span></td><td>Source URL retained, behind the SSRF guard</td></tr>
+</tbody></table>
+<h3>Recruiter <span class="cnt">10/12 done</span></h3><table><tbody>
+<tr class="p"><td class="id">REC-001</td><td class="st"><span class="pill p">Partial</span></td><td>No individual-versus-company choice at registration</td></tr>
+<tr class="d"><td class="id">REC-002</td><td class="st"><span class="pill d">Done</span></td><td>Company recruiters and seat roles</td></tr>
+<tr class="p"><td class="id">REC-003</td><td class="st"><span class="pill p">Partial</span></td><td>Edit, pause, close and publish are API-only; no screen calls them</td></tr>
+<tr class="d"><td class="id">REC-004</td><td class="st"><span class="pill d">Done</span></td><td>Must-have and nice-to-have entered separately</td></tr>
+<tr class="d"><td class="id">REC-005</td><td class="st"><span class="pill d">Done</span></td><td>Location, work model, type and salary</td></tr>
+<tr class="d"><td class="id">REC-006</td><td class="st"><span class="pill d">Done</span></td><td>Sponsorship stated per posting</td></tr>
+<tr class="d"><td class="id">REC-007</td><td class="st"><span class="pill d">Done</span> <span class="new">new</span></td><td>Job description document upload</td></tr>
+<tr class="d"><td class="id">REC-008</td><td class="st"><span class="pill d">Done</span></td><td>Connect a careers board or ATS by URL</td></tr>
+<tr class="d"><td class="id">REC-009</td><td class="st"><span class="pill d">Done</span></td><td>Easy Apply or redirect to the company site</td></tr>
+<tr class="d"><td class="id">REC-010</td><td class="st"><span class="pill d">Done</span></td><td>Ranked candidate deck per posting</td></tr>
+<tr class="d"><td class="id">REC-011</td><td class="st"><span class="pill d">Done</span></td><td>Rejection reasons from a closed vocabulary</td></tr>
+<tr class="d"><td class="id">REC-012</td><td class="st"><span class="pill d">Done</span></td><td>Score, shared skills, gaps and concerns on every card</td></tr>
+</tbody></table>
+<h3>Candidate profile <span class="cnt">9/12 done</span></h3><table><tbody>
+<tr class="d"><td class="id">CAN-001</td><td class="st"><span class="pill d">Done</span></td><td>Account type chosen once and permanent</td></tr>
+<tr class="d"><td class="id">CAN-002</td><td class="st"><span class="pill d">Done</span></td><td>Profile completion gates the feed</td></tr>
+<tr class="d"><td class="id">CAN-003</td><td class="st"><span class="pill d">Done</span></td><td>Current and preferred locations</td></tr>
+<tr class="d"><td class="id">CAN-004</td><td class="st"><span class="pill d">Done</span></td><td>Sponsorship need, nullable and fails open</td></tr>
+<tr class="x"><td class="id">CAN-005</td><td class="st"><span class="pill x">Deliberately not built</span></td><td>Work-authorization categories deliberately not collected</td></tr>
+<tr class="p"><td class="id">CAN-006</td><td class="st"><span class="pill p">Partial</span></td><td>Salary target yes; employment-type preference does not exist</td></tr>
+<tr class="p"><td class="id">CAN-007</td><td class="st"><span class="pill p">Partial</span></td><td>Skills yes; no structured target-role field</td></tr>
+<tr class="d"><td class="id">CAN-008</td><td class="st"><span class="pill d">Done</span></td><td>Relocation willingness and work model</td></tr>
+<tr class="d"><td class="id">CAN-009</td><td class="st"><span class="pill d">Done</span></td><td>Skills editable, normalised, capped at 40</td></tr>
+<tr class="d"><td class="id">CAN-010</td><td class="st"><span class="pill d">Done</span></td><td>Decks recompute from live data on every request</td></tr>
+<tr class="d"><td class="id">CAN-011</td><td class="st"><span class="pill d">Done</span></td><td>Match reasons, gaps and concerns shown</td></tr>
+<tr class="d"><td class="id">CAN-012</td><td class="st"><span class="pill d">Done</span></td><td>Closed allowlist on profile writes; scores are server-side only</td></tr>
+</tbody></table>
+<h3>Candidate sourcing <span class="cnt">6/7 done</span></h3><table><tbody>
+<tr class="d"><td class="id">CAND-001</td><td class="st"><span class="pill d">Done</span></td><td>Ranked candidate list per posting</td></tr>
+<tr class="p"><td class="id">CAND-002</td><td class="st"><span class="pill p">Partial</span></td><td>Filters exist as parameters; no recruiter UI sends them</td></tr>
+<tr class="d"><td class="id">CAND-003</td><td class="st"><span class="pill d">Done</span> <span class="new">new</span></td><td>Required and preferred gaps now reported separately</td></tr>
+<tr class="d"><td class="id">CAND-004</td><td class="st"><span class="pill d">Done</span></td><td>Score, tier and reasons on the recruiter card</td></tr>
+<tr class="d"><td class="id">CAND-005</td><td class="st"><span class="pill d">Done</span></td><td>Like and pass, with mutual match</td></tr>
+<tr class="d"><td class="id">CAND-006</td><td class="st"><span class="pill d">Done</span></td><td>Closed rejection vocabulary</td></tr>
+<tr class="d"><td class="id">CAND-007</td><td class="st"><span class="pill d">Done</span></td><td>Protected characteristics cannot be filtered on</td></tr>
+</tbody></table>
+<h3>Resume <span class="cnt">4/9 done</span></h3><table><tbody>
+<tr class="p"><td class="id">RES-001</td><td class="st"><span class="pill p">Partial</span></td><td>PDF and DOCX; legacy binary .doc is refused</td></tr>
+<tr class="d"><td class="id">RES-002</td><td class="st"><span class="pill d">Done</span></td><td>Deterministic parse into structured fields</td></tr>
+<tr class="p"><td class="id">RES-003</td><td class="st"><span class="pill p">Partial</span></td><td>Field-by-field approval, but values cannot be corrected before applying</td></tr>
+<tr class="p"><td class="id">RES-004</td><td class="st"><span class="pill p">Partial</span></td><td>Builds from profile; roles and education need an uploaded parse</td></tr>
+<tr class="d"><td class="id">RES-005</td><td class="st"><span class="pill d">Done</span></td><td>Tailoring and rewriting, guarded against fabrication</td></tr>
+<tr class="d"><td class="id">RES-006</td><td class="st"><span class="pill d">Done</span></td><td>Gap report against a specific posting</td></tr>
+<tr class="d"><td class="id">RES-007</td><td class="st"><span class="pill d">Done</span></td><td>Mechanical anti-fabrication check, not a prompt instruction</td></tr>
+<tr class="p"><td class="id">RES-008</td><td class="st"><span class="pill p">Partial</span></td><td>Versions accumulate but cannot be promoted or renamed</td></tr>
+<tr class="p"><td class="id">RES-009</td><td class="st"><span class="pill p">Partial</span></td><td>Rematching follows a profile write, not a resume change</td></tr>
+</tbody></table>
+<h3>Skill gaps <span class="cnt">4/5 done</span></h3><table><tbody>
+<tr class="d"><td class="id">GAP-001</td><td class="st"><span class="pill d">Done</span> <span class="new">new</span></td><td>Required and preferred compared and both reported</td></tr>
+<tr class="d"><td class="id">GAP-002</td><td class="st"><span class="pill d">Done</span></td><td>Strengths shown separately from gaps</td></tr>
+<tr class="d"><td class="id">GAP-003</td><td class="st"><span class="pill d">Done</span></td><td>Missing must-haves marked as material</td></tr>
+<tr class="d"><td class="id">GAP-004</td><td class="st"><span class="pill d">Done</span></td><td>Recommendations are deterministic templates, never generated</td></tr>
+<tr class="p"><td class="id">GAP-005</td><td class="st"><span class="pill p">Partial</span></td><td>Advice is static prose with no act-on-it control</td></tr>
+</tbody></table>
+<h3>Matching <span class="cnt">12/13 done</span></h3><table><tbody>
+<tr class="d"><td class="id">MAT-001</td><td class="st"><span class="pill d">Done</span></td><td>Required and preferred stored separately</td></tr>
+<tr class="d"><td class="id">MAT-002</td><td class="st"><span class="pill d">Done</span></td><td>Missing must-haves materially reduce the score</td></tr>
+<tr class="d"><td class="id">MAT-003</td><td class="st"><span class="pill d">Done</span></td><td>Missing nice-to-haves never exclude</td></tr>
+<tr class="d"><td class="id">MAT-004</td><td class="st"><span class="pill d">Done</span></td><td>Alias and adjacency matching, used by retrieval and scoring alike</td></tr>
+<tr class="d"><td class="id">MAT-005</td><td class="st"><span class="pill d">Done</span></td><td>Explicit skills distinguished from inferred, with provenance</td></tr>
+<tr class="d"><td class="id">MAT-006</td><td class="st"><span class="pill d">Done</span> <span class="new">new</span></td><td>Explanation separates must-have from nice-to-have gaps</td></tr>
+<tr class="d"><td class="id">MATCH-001</td><td class="st"><span class="pill d">Done</span></td><td>Candidate interest alone does not open a conversation</td></tr>
+<tr class="d"><td class="id">MATCH-002</td><td class="st"><span class="pill d">Done</span></td><td>Recruiter interest alone does not either</td></tr>
+<tr class="d"><td class="id">MATCH-003</td><td class="st"><span class="pill d">Done</span></td><td>Mutual interest creates one match, idempotently</td></tr>
+<tr class="d"><td class="id">MATCH-004</td><td class="st"><span class="pill d">Done</span></td><td>Only participants can open a thread</td></tr>
+<tr class="d"><td class="id">MATCH-005</td><td class="st"><span class="pill d">Done</span></td><td>Messaging after a match</td></tr>
+<tr class="d"><td class="id">MATCH-006</td><td class="st"><span class="pill d">Done</span></td><td>Notification preferences and suppression</td></tr>
+<tr class="p"><td class="id">MATCH-007</td><td class="st"><span class="pill p">Partial</span></td><td>Report and block exist as APIs with no user-facing control</td></tr>
+</tbody></table>
+<h3>Feed <span class="cnt">7/7 done</span></h3><table><tbody>
+<tr class="d"><td class="id">FEED-001</td><td class="st"><span class="pill d">Done</span></td><td>Personalised feed, recomputed per request</td></tr>
+<tr class="d"><td class="id">FEED-002</td><td class="st"><span class="pill d">Done</span></td><td>Swipe right</td></tr>
+<tr class="d"><td class="id">FEED-003</td><td class="st"><span class="pill d">Done</span></td><td>Swipe left</td></tr>
+<tr class="d"><td class="id">FEED-004</td><td class="st"><span class="pill d">Done</span></td><td>Score and reasons on the card</td></tr>
+<tr class="d"><td class="id">FEED-005</td><td class="st"><span class="pill d">Done</span></td><td>Easy Apply</td></tr>
+<tr class="d"><td class="id">FEED-006</td><td class="st"><span class="pill d">Done</span></td><td>Redirect to the company site</td></tr>
+<tr class="d"><td class="id">FEED-007</td><td class="st"><span class="pill d">Done</span></td><td>Hard-ineligible jobs never surface</td></tr>
+</tbody></table>
+<h3>Applications <span class="cnt">4/7 done</span></h3><table><tbody>
+<tr class="d"><td class="id">APP-001</td><td class="st"><span class="pill d">Done</span></td><td>In-app application with recruiter notification</td></tr>
+<tr class="m"><td class="id">APP-002</td><td class="st"><span class="pill m">Not built</span></td><td>An application does not reference a resume version</td></tr>
+<tr class="p"><td class="id">APP-003</td><td class="st"><span class="pill p">Partial</span></td><td>Applicant list is an API; no screen consumes it</td></tr>
+<tr class="d"><td class="id">APP-004</td><td class="st"><span class="pill d">Done</span></td><td>Status tracking through a state machine</td></tr>
+<tr class="p"><td class="id">APP-005</td><td class="st"><span class="pill p">Partial</span></td><td>Duplicates blocked unconditionally; no reapply setting</td></tr>
+<tr class="d"><td class="id">APP-006</td><td class="st"><span class="pill d">Done</span></td><td>External redirect recorded as its own status</td></tr>
+<tr class="d"><td class="id">APP-007</td><td class="st"><span class="pill d">Done</span></td><td>A closed role refuses new applications</td></tr>
+</tbody></table>
+<h3>Business rules <span class="cnt">11/13 done</span></h3><table><tbody>
+<tr class="d"><td class="id">BR-001</td><td class="st"><span class="pill d">Done</span></td><td>Candidates cannot post jobs</td></tr>
+<tr class="d"><td class="id">BR-002</td><td class="st"><span class="pill d">Done</span></td><td>Only recruiters and company members post</td></tr>
+<tr class="d"><td class="id">BR-003</td><td class="st"><span class="pill d">Done</span></td><td>Only company admins invite</td></tr>
+<tr class="p"><td class="id">BR-004</td><td class="st"><span class="pill p">Partial</span></td><td>Seat limit enforced but not raisable through any interface</td></tr>
+<tr class="d"><td class="id">BR-005</td><td class="st"><span class="pill d">Done</span></td><td>Must-haves weigh more than nice-to-haves</td></tr>
+<tr class="d"><td class="id">BR-006</td><td class="st"><span class="pill d">Done</span></td><td>Sponsorship as Stage-1 eligibility, never a ranking dial</td></tr>
+<tr class="d"><td class="id">BR-007</td><td class="st"><span class="pill d">Done</span></td><td>Location and work model as eligibility</td></tr>
+<tr class="d"><td class="id">BR-008</td><td class="st"><span class="pill d">Done</span></td><td>Conversation only after mutual interest</td></tr>
+<tr class="p"><td class="id">BR-009</td><td class="st"><span class="pill p">Partial</span></td><td>Decks recompute live; stored match scores never do</td></tr>
+<tr class="d"><td class="id">BR-010</td><td class="st"><span class="pill d">Done</span></td><td>AI cannot fabricate qualifications</td></tr>
+<tr class="d"><td class="id">BR-011</td><td class="st"><span class="pill d">Done</span></td><td>Rejection reasons are a closed list</td></tr>
+<tr class="d"><td class="id">BR-012</td><td class="st"><span class="pill d">Done</span></td><td>Application status independent of match lifecycle</td></tr>
+<tr class="d"><td class="id">BR-013</td><td class="st"><span class="pill d">Done</span></td><td>Closed roles refuse applications</td></tr>
+</tbody></table>
+<h3>Non-functional <span class="cnt">4/10 done</span></h3><table><tbody>
+<tr class="d"><td class="id">NFR-001</td><td class="st"><span class="pill d">Done</span></td><td>Authorization on every route, server-side</td></tr>
+<tr class="d"><td class="id">NFR-002</td><td class="st"><span class="pill d">Done</span> <span class="new">new</span></td><td>Need-to-know access to candidate data</td></tr>
+<tr class="d"><td class="id">NFR-003</td><td class="st"><span class="pill d">Done</span></td><td>Private storage with short-lived signed URLs</td></tr>
+<tr class="p"><td class="id">NFR-004</td><td class="st"><span class="pill p">Partial</span></td><td>Append-only audit log, but self-edits are unaudited and untested</td></tr>
+<tr class="d"><td class="id">NFR-005</td><td class="st"><span class="pill d">Done</span></td><td>Every score carries a model version</td></tr>
+<tr class="m"><td class="id">NFR-006</td><td class="st"><span class="pill m">Not built</span></td><td>No queue or worker; heavy work runs inline</td></tr>
+<tr class="p"><td class="id">NFR-007</td><td class="st"><span class="pill p">Partial</span></td><td>Below-bar matches are labelled; hard exclusions are silent</td></tr>
+<tr class="p"><td class="id">NFR-008</td><td class="st"><span class="pill p">Partial</span></td><td>24 handlers still return raw error text</td></tr>
+<tr class="p"><td class="id">NFR-009</td><td class="st"><span class="pill p">Partial</span></td><td>Weights are versioned but not configurable</td></tr>
+<tr class="p"><td class="id">NFR-010</td><td class="st"><span class="pill p">Partial</span></td><td>Health covers email, config, storage, ingestion, parsing — not matching or messaging</td></tr>
+</tbody></table>
+<h3>Acceptance criteria <span class="cnt">10/15 done</span></h3><table><tbody>
+<tr class="d"><td class="id">AC-001</td><td class="st"><span class="pill d">Done</span></td><td>Candidate cannot create a job by UI or API</td></tr>
+<tr class="d"><td class="id">AC-002</td><td class="st"><span class="pill d">Done</span></td><td>Recruiter can create and publish a valid job</td></tr>
+<tr class="d"><td class="id">AC-003</td><td class="st"><span class="pill d">Done</span> <span class="new">new</span></td><td>Import produces editable structured fields</td></tr>
+<tr class="d"><td class="id">AC-004</td><td class="st"><span class="pill d">Done</span></td><td>Resume upload extracts candidate data</td></tr>
+<tr class="d"><td class="id">AC-005</td><td class="st"><span class="pill d">Done</span></td><td>AI improves without fabricating</td></tr>
+<tr class="p"><td class="id">AC-006</td><td class="st"><span class="pill p">Partial</span></td><td>Sponsorship filter tested as a predicate, not through a deck</td></tr>
+<tr class="d"><td class="id">AC-007</td><td class="st"><span class="pill d">Done</span></td><td>Preferred-skill gaps do not exclude</td></tr>
+<tr class="p"><td class="id">AC-008</td><td class="st"><span class="pill p">Partial</span></td><td>Required gaps reduce the score; no configurable exclusion policy</td></tr>
+<tr class="d"><td class="id">AC-009</td><td class="st"><span class="pill d">Done</span></td><td>Chat only after mutual match</td></tr>
+<tr class="m"><td class="id">AC-010</td><td class="st"><span class="pill m">Not built</span></td><td>A profile change does not update existing matches</td></tr>
+<tr class="m"><td class="id">AC-011</td><td class="st"><span class="pill m">Not built</span></td><td>A resume change does not either</td></tr>
+<tr class="m"><td class="id">AC-012</td><td class="st"><span class="pill m">Not built</span></td><td>A job change does not either</td></tr>
+<tr class="d"><td class="id">AC-013</td><td class="st"><span class="pill d">Done</span></td><td>Closed role refuses new applications</td></tr>
+<tr class="d"><td class="id">AC-014</td><td class="st"><span class="pill d">Done</span></td><td>Rejection reasons validated against the closed list</td></tr>
+<tr class="d"><td class="id">AC-015</td><td class="st"><span class="pill d">Done</span></td><td>Permission checks are server-side</td></tr>
+</tbody></table></div>
+
+<h2>What is still open, and why</h2>
+
+<p class="lead">Five requirements are genuinely unbuilt, and one is a deliberate refusal.</p>
+<ul>
+  <li><b>AC-010, AC-011, AC-012, BR-009 — rematching on change.</b> The feed and every explanation are recomputed
+    from live data on each request, so a candidate who edits their skills sees different jobs immediately. What does
+    not update is the <em>stored</em> score on an existing match, which was written once at the moment two people
+    swiped. So a match made in July can still display a score from an older model. This needs a rescoring pass, and
+    a decision from you about whether a score changing under an existing conversation is desirable.</li>
+  <li><b>APP-002 — resume version on an application.</b> Resumes are versioned, but an application does not record
+    which version was current when it was sent, so a candidate who later replaces their CV silently changes what a
+    recruiter appears to have received.</li>
+  <li><b>NFR-006 — background processing.</b> Resume parsing and job import run inside the request. Acceptable at
+    current volume; the first thing to break under load.</li>
+  <li><b>CAN-005 — work-authorization categories.</b> <b>Deliberately not built.</b> Collecting visa categories
+    invites hiring decisions on national origin, which is what the IRCA anti-discrimination provision prohibits. The
+    codebase substitutes a single "will you need sponsorship?" question, which is the lawful form of the same
+    business need, and there is a CI guard that fails the build if a category ever reaches the matching path. This is
+    a decision to keep, not a gap to close — but it is your decision, and it is worth your counsel confirming it.</li>
+</ul>
+
+<p class="lead">The 32 partials are mostly one shape: the server is complete and tested, and nothing in the product
+calls it.</p>
+<ul>
+  <li><b>Job management (REC-003)</b> — edit, pause, close and publish-a-draft all work through the API and have
+    tests. No screen calls them, so the composer's "Save as draft" writes something the recruiter can never reopen.
+    This is the largest usability hole in the product today.</li>
+  <li><b>Recruiter filters (CAND-002)</b> — skills, experience, work model and salary all filter correctly as query
+    parameters. The sourcing screen sends none of them.</li>
+  <li><b>Team management (ORG-004 to ORG-008)</b> — invitations, seats, revocation and member removal are all
+    implemented and enforced. There is no team screen.</li>
+  <li><b>Report and block (MATCH-007)</b> — both endpoints work and are tested. Neither has a button.</li>
+  <li><b>Applicant list (APP-003)</b> — the API returns a recruiter's applicants; nothing displays them.</li>
+</ul>
+
+<h2>Production readiness</h2>
+
+<p class="lead">The engineering side is in good shape. 700 automated tests pass, the build compiles, and the
+security, compliance and matching suites are genuinely thorough. What is not ready is mostly not code.</p>
+
+<div class="box warn">
+  <h4>Blocking, and only you can do these</h4>
+  <ul style="margin:6px 0 0">
+    <li><b>Rotate the exposed credentials.</b> The database password, <code>AUTH_SECRET</code>, <code>CRON_SECRET</code>
+      and the RapidAPI key have all appeared in screenshots or transcripts.</li>
+    <li><b>Make the repository private</b> if it is not already.</li>
+    <li><b>Set <code>CRON_SECRET</code></b> — without it the nightly ingestion refuses to run in production, so no job
+      source pulls on a schedule however many keys are configured.</li>
+    <li><b>A verified sending domain</b>, so password resets and verification emails actually arrive.</li>
+  </ul>
+</div>
+
+<div class="box">
+  <h4>Needed before launch, but not by me</h4>
+  <ul style="margin:6px 0 0">
+    <li><b>An independent bias audit</b> — Jobsy ranks candidates for employers, which makes it an Automated
+      Employment Decision Tool under NYC Local Law 144. The audit is annual, must be independent, and its summary has
+      to be published. The engine is built to be auditable — decomposable scores, a versioned model, no protected
+      attributes anywhere near it — but being auditable is not the same as having been audited.</li>
+    <li><b>Counsel review</b> of the Terms, the Privacy Policy and the AEDT notice.</li>
+    <li><b>Accessibility verification.</b> One WCAG contrast assertion exists, on one element. Focus rings, reduced
+      motion and pinch-zoom are implemented; nothing has been tested with a keyboard or a screen reader.</li>
+    <li><b>Load testing.</b> Nothing in the suite measures latency under concurrency.</li>
+  </ul>
+</div>
+
+<p style="font-size:13px;color:var(--dim2);margin-top:26px">Verified against the code at v2.22. Counts describe
+requirements, not effort — a partial with no UI can be a day's work or a week's.</p>
+</div>

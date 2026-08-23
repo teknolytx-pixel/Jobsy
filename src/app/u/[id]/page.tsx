@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
-import { db, users } from "@/db";
+import { and, eq } from "drizzle-orm";
+import { db, users, applications, matches, jobs } from "@/db";
 import { currentUser } from "@/lib/auth";
 import { Avatar } from "@/components/ui";
 import { REMOTE_LABEL } from "@/components/format";
@@ -8,7 +8,55 @@ import { Icon } from "@/components/Icon";
 
 export const dynamic = "force-dynamic";
 
-/** The profile link inside Easy Apply emails. Requires a signed-in viewer. */
+/**
+ * NFR-002 — a candidate's profile is visible to people they have a
+ * relationship with, and to nobody else.
+ *
+ * ── What this was ──
+ *
+ * "Requires a signed-in viewer", and that was the whole check. Any account on
+ * the platform could walk /u/<id> for any id and read that person's full
+ * profile INCLUDING their email address — salary target, availability,
+ * whether they are quietly open to offers, and a mailto: link. Candidates
+ * could read each other. A recruiter who had never encountered someone could
+ * harvest addresses by iterating ids.
+ *
+ * The page exists to serve the profile link inside an Easy Apply email, so the
+ * legitimate audience was always narrow. "Signed in" is not that audience.
+ *
+ * ── Who may see it now ──
+ *
+ *   • the candidate themselves;
+ *   • a recruiter the candidate has APPLIED to (that is the Easy Apply case —
+ *     the candidate initiated it and expects to be looked at);
+ *   • either party to a mutual MATCH.
+ *
+ * Everyone else gets notFound() rather than a 403, because "this candidate
+ * exists but you may not see them" is itself a disclosure when the id is being
+ * guessed.
+ */
+async function viewerMaySee(viewerId: string, candidateId: string): Promise<boolean> {
+  if (viewerId === candidateId) return true;
+
+  // Applied to one of the viewer's postings.
+  const applied = await db
+    .select({ id: applications.id })
+    .from(applications)
+    .innerJoin(jobs, eq(applications.jobId, jobs.id))
+    .where(and(eq(applications.candidateId, candidateId), eq(jobs.postedById, viewerId)))
+    .limit(1);
+  if (applied.length) return true;
+
+  // Mutually matched, from either side.
+  const matched = await db
+    .select({ id: matches.id })
+    .from(matches)
+    .where(and(eq(matches.candidateId, candidateId), eq(matches.recruiterId, viewerId)))
+    .limit(1);
+  return matched.length > 0;
+}
+
+/** The profile link inside Easy Apply emails. */
 export default async function CandidateProfile({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const viewer = await currentUser();
@@ -17,6 +65,8 @@ export default async function CandidateProfile({ params }: { params: Promise<{ i
   const rows = await db.select().from(users).where(eq(users.id, id)).limit(1);
   const u = rows[0];
   if (!u) notFound();
+
+  if (!(await viewerMaySee(viewer.id, u.id))) notFound();
 
   return (
     <div className="shell">
