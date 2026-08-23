@@ -7,8 +7,22 @@ import { Avatar } from "@/components/ui";
 import { money, REMOTE_LABEL } from "@/components/format";
 import { Icon, Logo } from "@/components/Icon";
 import SignOutButton from "@/components/SignOutButton";
+import JobActions from "./JobActions";
+import { JOB_STATUS_LABEL, type JobStatus } from "@/lib/jobStatus";
 
 export const dynamic = "force-dynamic";
+
+/** Badge text. The full sentence lives in JOB_STATUS_LABEL, inside the sheet. */
+const SHORT_STATUS: Record<JobStatus, string> = {
+  DRAFT: "Draft",
+  PUBLISHED: "Live",
+  PAUSED: "Paused",
+  CLOSED: "Closed",
+  ARCHIVED: "Archived",
+};
+
+/** Green for live, blue for anything still actionable, muted for finished. */
+const statusTone = (s: JobStatus) => (s === "PUBLISHED" ? "a" : s === "DRAFT" || s === "PAUSED" ? "s" : "m");
 
 export default async function MyJobsPage() {
   const user = await currentUser();
@@ -81,7 +95,25 @@ export default async function MyJobsPage() {
                   swipes · {r.applicants} applied · {r.reviewed} reviewed · {r.matched} matched
                 </div>
               </div>
-              <span className={`badge ${r.job.active ? "a" : "s"}`}>{r.job.active ? "Live" : "Closed"}</span>
+              {/*
+                The real status, not a boolean.
+                "Live or Closed" collapsed five states into two, so a DRAFT and
+                a PAUSED and an ARCHIVED posting all read as "Closed" — which is
+                exactly the confusion that made the draft feel like a black hole.
+              */}
+              <span className={`badge ${statusTone(r.job.status as JobStatus)}`}>
+                {SHORT_STATUS[r.job.status as JobStatus] ?? r.job.status}
+              </span>
+              <JobActions
+                jobId={r.job.id}
+                status={r.job.status as JobStatus}
+                editable={r.job.source === "JOBSY"}
+                title={r.job.title}
+                location={r.job.location}
+                salaryMin={r.job.salaryMin}
+                salaryMax={r.job.salaryMax}
+                benefitsDescription={r.job.benefitsDescription}
+              />
             </div>
           ))
         )}

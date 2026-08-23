@@ -46,7 +46,9 @@ export type IconName =
   | "link"
   | "info"
   | "key"
-  | "sparkle";
+  | "sparkle"
+  | "pencil"
+  | "sliders";
 
 /**
  * One entry per icon. Stroke geometry only — no fills, so an icon reads the
@@ -212,6 +214,21 @@ const PATHS: Record<IconName, React.ReactNode> = {
     <>
       <path d="M12 3.2 13.9 9l5.8 1.9-5.8 1.9L12 18.6l-1.9-5.8L4.3 11 10.1 9 12 3.2Z" />
       <path d="M18.6 3.4v3M17.1 4.9h3" />
+    </>
+  ),
+  /** Edit. The set had no way to say "change this", so buttons borrowed
+      metaphors that meant something else. */
+  pencil: (
+    <>
+      <path d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-3-3L5 17v3Z" />
+      <path d="M14.5 6.5l3 3" />
+    </>
+  ),
+  /** Filters and settings — a control surface, not a magic wand. */
+  sliders: (
+    <>
+      <path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h10M18 18h2" />
+      <path d="M16 6a2 2 0 1 0 0-.01M10 12a2 2 0 1 0 0-.01M16 18a2 2 0 1 0 0-.01" />
     </>
   ),
 };

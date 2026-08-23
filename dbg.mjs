@@ -1,0 +1,16 @@
+import { chromium } from 'playwright';
+const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+const p = await b.newPage({ viewport:{width:1440,height:1000} });
+await p.goto('http://localhost:3166/login',{waitUntil:'networkidle'});
+await p.fill('input[type=email]','recruiter@demo.jobsy');
+await p.fill('input[type=password]','local-dev-pw');
+await p.click('button:has-text("Sign in")');
+await p.waitForTimeout(2500);
+console.log("after login url:", p.url());
+await p.goto('http://localhost:3166/jobs',{waitUntil:'networkidle'});
+console.log("jobs url:", p.url());
+const txt = await p.locator('body').innerText();
+console.log("--- page text (first 600) ---");
+console.log(txt.slice(0,600));
+console.log("--- rows:", await p.locator('.row').count());
+await b.close();
