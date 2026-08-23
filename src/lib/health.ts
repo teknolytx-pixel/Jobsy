@@ -33,7 +33,7 @@ export type Severity = "CRITICAL" | "WARNING" | "OK";
 
 export type HealthFinding = {
   severity: Severity;
-  area: "EMAIL" | "CONFIG" | "STORAGE" | "INGESTION" | "PARSING";
+  area: "EMAIL" | "CONFIG" | "STORAGE" | "INGESTION" | "PARSING" | "SCHEMA";
   title: string;
   /** What is actually wrong, in a sentence an operator can act on. */
   detail: string;
@@ -60,6 +60,13 @@ export type HealthInput = {
   };
   /** Resumes on record. Zero means nothing has been lost yet. */
   resumesStored: number;
+  /**
+   * Enum values the CODE knows about and the DATABASE does not.
+   *
+   * Optional because most callers have no reason to look, and absent is not the
+   * same as empty: absent means nobody checked.
+   */
+  schemaDrift?: { type: string; missing: string[] }[];
 };
 
 /**
@@ -194,6 +201,37 @@ export function assess(input: HealthInput): HealthFinding[] {
       title: `${s.name} is failing to sync`,
       detail: s.error.slice(0, 240),
       action: "Check the source on the Sources screen; a board that has moved or closed can be removed.",
+    });
+  }
+
+  /**
+   * ── A database a version behind the code ──
+   *
+   * This is worth a CRITICAL of its own because of how it PRESENTS. Nothing is
+   * down. Pages load, the deck works, most of the app is fine — and then one
+   * feature fails with an error that describes a query rather than a cause, and
+   * whoever is looking at it reasonably concludes the feature is broken.
+   *
+   * It happened exactly that way: an administrator connected a careers page,
+   * detection worked perfectly, and the save failed because the deployed code
+   * knew a source kind the database had never been told about. The screen said
+   * nothing useful, and there was no other place to look.
+   *
+   * A missing enum value is the cheapest possible signal of a missed migration,
+   * and it is the whole answer: run the migration.
+   */
+  for (const drift of input.schemaDrift ?? []) {
+    out.push({
+      severity: "CRITICAL",
+      area: "SCHEMA",
+      title: `The database is behind the code (${drift.type})`,
+      detail:
+        `This deployment uses ${drift.missing.length === 1 ? "a value" : "values"} the database has never been told about: ` +
+        `${drift.missing.join(", ")}. Anything that writes ${drift.missing.length === 1 ? "it" : "them"} fails, ` +
+        "while the rest of the app looks healthy.",
+      action:
+        "Run the pending migration against this deployment's database: npx drizzle-kit migrate. " +
+        "Check DATABASE_URL points at the same database the deployment uses — migrating a different one changes nothing here.",
     });
   }
 

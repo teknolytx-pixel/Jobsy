@@ -300,6 +300,43 @@ const RAW_SQL_ERROR = new Error(
     'invalid input value for enum source_kind: "JSONLD_CRAWL"'
 );
 
+/**
+ * The shape Drizzle actually throws, and the reason the first attempt at this
+ * classification silently produced a generic 500 in production: the outer
+ * message is the query, and the DATABASE's complaint — text and SQLSTATE — is
+ * hung on `.cause`. Matching only the outer message matched the one string
+ * guaranteed to contain no diagnosis.
+ */
+const WRAPPED = Object.assign(new Error(RAW_SQL_ERROR.message.split("\n")[0]), {
+  cause: Object.assign(new Error('invalid input value for enum source_kind: "JSONLD_CRAWL"'), {
+    code: "22P02",
+    severity: "ERROR",
+  }),
+});
+
+const wrapped = describeError(WRAPPED, "connecting that careers page");
+check("TC-CRAWL-107 the diagnosis is read from the cause, not the message",
+  wrapped.status === 503, `${wrapped.status}`);
+check("TC-CRAWL-108 and the SQLSTATE code comes back for diagnosis",
+  wrapped.reference === "22P02", wrapped.reference ?? "none");
+check("TC-CRAWL-109 still no SQL in what the caller sees",
+  !/select |from "|params:/i.test(wrapped.error + (wrapped.hint ?? "")), wrapped.error);
+
+/** Codes are preferred over prose, which is translated in some deployments. */
+const byCodeOnly = describeError(
+  Object.assign(new Error("Failed query"), {
+    cause: Object.assign(new Error("Spalte existiert nicht"), { code: "42703" }),
+  }),
+  "loading job sources"
+);
+check("TC-CRAWL-110 a SQLSTATE code alone is enough", byCodeOnly.status === 503, `${byCodeOnly.status}`);
+
+/** A cycle in the cause chain must not hang the request. */
+const cyclic: { cause?: unknown; message: string } = { message: "outer" };
+cyclic.cause = cyclic;
+check("TC-CRAWL-111 a cyclic cause chain terminates",
+  describeError(cyclic, "syncing that source").status === 500);
+
 const behind = describeError(RAW_SQL_ERROR, "connecting that careers page");
 check("TC-CRAWL-100 a schema-behind error is recognised", behind.status === 503, `${behind.status}`);
 check("TC-CRAWL-101 and names the fix", /migration/i.test(behind.hint ?? ""), behind.hint ?? "—");
@@ -314,6 +351,60 @@ check("TC-CRAWL-105 and leaks no internals",
   !/10\.0\.|5432|ECONNRESET/.test(generic.error), generic.error);
 check("TC-CRAWL-106 but still says what was being attempted",
   /syncing that source/.test(generic.error), generic.error);
+
+
+// ─────────────────────────────────────────────────────────────
+console.log("\nSPOTTING A DATABASE THAT IS BEHIND THE CODE\n");
+
+const { compareEnums } = await import("../src/lib/schemaDrift");
+const { assess } = await import("../src/lib/health");
+
+const declared = [
+  { enumName: "source_kind", enumValues: ["GREENHOUSE", "JSONLD", "JSONLD_CRAWL", "XML_FEED"] },
+  { enumName: "source_status", enumValues: ["PENDING", "OK"] },
+];
+
+const behindDb = compareEnums(declared, new Map([
+  ["source_kind", new Set(["GREENHOUSE", "JSONLD", "XML_FEED"])],
+  ["source_status", new Set(["PENDING", "OK"])],
+]));
+check("TC-CRAWL-120 a missing enum value is found", behindDb.length === 1, JSON.stringify(behindDb));
+check("TC-CRAWL-121 and named exactly", behindDb[0]?.missing.join() === "JSONLD_CRAWL", behindDb[0]?.missing.join());
+
+const migrated = compareEnums(declared, new Map([
+  ["source_kind", new Set(["GREENHOUSE", "JSONLD", "JSONLD_CRAWL", "XML_FEED"])],
+  ["source_status", new Set(["PENDING", "OK"])],
+]));
+check("TC-CRAWL-122 a migrated database is quiet", migrated.length === 0, JSON.stringify(migrated));
+
+/** Extra values in the database are not drift — an older deployment may still need them. */
+const extra = compareEnums(declared, new Map([
+  ["source_kind", new Set(["GREENHOUSE", "JSONLD", "JSONLD_CRAWL", "XML_FEED", "SOMETHING_NEWER"])],
+  ["source_status", new Set(["PENDING", "OK"])],
+]));
+check("TC-CRAWL-123 values the code doesn't know are not an alarm", extra.length === 0, JSON.stringify(extra));
+
+const HEALTH_BASE = {
+  email: { sent: 10, failed: 0, loggedOnly: 0, suppressed: 0, queued: 0 },
+  failingSources: [],
+  resumeParseFailures: 0,
+  resumeUploads: 0,
+  resumesStored: 0,
+  config: { emailEnabled: true, appUrl: "https://jobsy.app", isProduction: true,
+    expectedHosts: ["jobsy.app"], usingBlob: true },
+};
+
+const alerted = assess({ ...HEALTH_BASE, schemaDrift: behindDb });
+const schemaFinding = alerted.find((f) => f.area === "SCHEMA");
+check("TC-CRAWL-124 health reports it", Boolean(schemaFinding), alerted.map((f) => f.area).join());
+check("TC-CRAWL-125 as CRITICAL, because one feature fails while the app looks fine",
+  schemaFinding?.severity === "CRITICAL", schemaFinding?.severity);
+check("TC-CRAWL-126 and the action is the migration",
+  /drizzle-kit migrate/.test(schemaFinding?.action ?? ""), schemaFinding?.action?.slice(0, 60));
+check("TC-CRAWL-127 and warns that the wrong database is a real possibility",
+  /DATABASE_URL/.test(schemaFinding?.action ?? ""), schemaFinding?.action?.slice(-70));
+check("TC-CRAWL-128 a healthy database raises nothing",
+  !assess({ ...HEALTH_BASE, schemaDrift: [] }).some((f) => f.area === "SCHEMA"));
 
 globalThis.fetch = realFetch;
 console.log(`\n${pass} passed, ${fail} failed  —  crawl\n`);

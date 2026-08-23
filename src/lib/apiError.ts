@@ -36,35 +36,80 @@ import { NextResponse } from "next/server";
  */
 
 /**
- * Postgres, through Drizzle, for the specific case where the deployed code
- * knows about an enum value, column or table the database has not been
- * migrated to yet.
+ * ── Why this reads `cause` and not just `message` ──
  *
- * Matched on the database's own error text rather than a code, because the
- * error arrives wrapped by the driver and the original code is not reliably on
- * the object we are handed.
+ * The first version of this file matched on the error text and produced the
+ * generic 500 anyway, because Drizzle does not put the database's complaint in
+ * the message. It throws its own error reading
+ *
+ *   Failed query: select "id", "kind", … params: JSONLD_CRAWL,…
+ *
+ * and hangs the actual Postgres error — the one that says
+ * `invalid input value for enum source_kind`, and carries the SQLSTATE code —
+ * on `.cause`. Matching the outer message therefore matched the one string
+ * guaranteed to contain no diagnosis at all.
+ *
+ * So walk the chain, and prefer the SQLSTATE code over the text: the codes are
+ * defined by Postgres and stable across versions and locales, while the message
+ * is prose that can be translated.
  */
-const SCHEMA_BEHIND =
+const SCHEMA_BEHIND_CODES = new Set([
+  "22P02", // invalid_text_representation — an enum value the type does not have
+  "42704", // undefined_object — the type itself is missing
+  "42703", // undefined_column
+  "42P01", // undefined_table
+]);
+
+const SCHEMA_BEHIND_TEXT =
   /invalid input value for enum|column .* does not exist|relation .* does not exist|type .* does not exist/i;
 
-export type SafeError = { error: string; hint?: string; status: number };
+export type SafeError = {
+  error: string;
+  hint?: string;
+  status: number;
+  /**
+   * A SQLSTATE code, when there was one.
+   *
+   * Shown to the caller because five characters of standardised code is not a
+   * schema leak, and without it a 500 on somebody else's deployment is
+   * undiagnosable from the screen. It is the difference between "something went
+   * wrong" and a fault anyone can look up.
+   */
+  reference?: string;
+};
 
-/** Classify an unexpected error without leaking its text. */
+type ErrorLike = { message?: unknown; code?: unknown; cause?: unknown };
+
+/** Every error in the `cause` chain, outermost first. Depth-capped against cycles. */
+function chain(e: unknown, depth = 0): ErrorLike[] {
+  if (!e || typeof e !== "object" || depth > 5) return [];
+  const self = e as ErrorLike;
+  return [self, ...chain(self.cause, depth + 1)];
+}
+
+/** Classify an unexpected error without repeating its text. */
 export function describeError(e: unknown, action: string): SafeError {
-  const raw = e instanceof Error ? e.message : String(e);
+  const links = chain(e);
+  const text = links
+    .map((l) => (typeof l.message === "string" ? l.message : ""))
+    .join("\n")
+    .concat(e instanceof Error ? "" : `\n${String(e)}`);
+  const code = links.map((l) => l.code).find((c) => typeof c === "string") as string | undefined;
 
-  if (SCHEMA_BEHIND.test(raw)) {
+  if ((code && SCHEMA_BEHIND_CODES.has(code)) || SCHEMA_BEHIND_TEXT.test(text)) {
     return {
       status: 503,
       error:
         "Jobsy's database is a version behind the app, so it doesn't recognise something this release added.",
       hint: "An administrator needs to run the pending database migration (npx drizzle-kit migrate), then this will work.",
+      reference: code,
     };
   }
 
   return {
     status: 500,
     error: `Something went wrong while ${action}. The details are in the server log.`,
+    reference: code,
   };
 }
 
@@ -77,10 +122,22 @@ export function describeError(e: unknown, action: string): SafeError {
  */
 export function errorResponse(e: unknown, action: string): NextResponse {
   const safe = describeError(e, action);
-  // The full error, once, where an operator can find it.
+  /**
+   * The full error, once, where an operator can find it — INCLUDING the cause
+   * chain, which is where the diagnosis lives and which console.error prints
+   * only shallowly for a wrapped error.
+   */
   console.error(`[api] ${action}:`, e);
+  for (let c = (e as { cause?: unknown })?.cause, i = 0; c && i < 5; c = (c as { cause?: unknown })?.cause, i++) {
+    console.error(`[api] ${action}: caused by`, c);
+  }
+
+  const suggestions = safe.hint ? [safe.hint] : [];
   return NextResponse.json(
-    safe.hint ? { error: safe.error, suggestions: [safe.hint] } : { error: safe.error },
+    {
+      error: safe.reference ? `${safe.error} (reference ${safe.reference})` : safe.error,
+      ...(suggestions.length ? { suggestions } : {}),
+    },
     { status: safe.status }
   );
 }
