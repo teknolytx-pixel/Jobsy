@@ -52,6 +52,16 @@ type Suggestion = {
 /** Matches src/lib/resume/parse.ts — below this a field arrives unticked. */
 const CONFIDENT = 0.7;
 
+/**
+ * Must match MAX_BYTES in the upload route.
+ *
+ * Duplicated rather than imported: this is a client component, and the route
+ * imports the database client — pulling it in here would drag the ORM into the
+ * browser bundle, which has broken the landing page before.
+ */
+const MAX_MB = 4;
+const MAX_BYTES = MAX_MB * 1024 * 1024;
+
 const FIELD_LABEL: Record<string, string> = {
   headline: "Headline",
   summary: "Summary",
@@ -211,7 +221,20 @@ export default function ResumeUpload({ onChanged }: { onChanged?: () => void }) 
         style={{ display: "none" }}
         onChange={(e) => {
           const f = e.target.files?.[0];
-          if (f) void upload(f);
+          if (!f) return;
+          // Checked here as well as on the server, because a file this size is
+          // rejected by the platform before our route runs — so without this
+          // the candidate would watch a long upload fail with a generic error.
+          if (f.size > MAX_BYTES) {
+            setErr(
+              `That file is ${(f.size / 1048576).toFixed(1)} MB, and the limit is ${MAX_MB} MB. ` +
+                "Most CVs are well under 1 MB — a large one usually means a scanned page or an embedded photo, " +
+                "and exporting to PDF again will shrink it."
+            );
+            e.target.value = "";
+            return;
+          }
+          void upload(f);
         }}
       />
 
@@ -220,7 +243,7 @@ export default function ResumeUpload({ onChanged }: { onChanged?: () => void }) 
         {busy ? "Working…" : rows?.length ? "Upload a new version" : "Upload your CV"}
       </button>
       <div className="s2" style={{ color: "var(--dim2)", margin: "8px 2px 0" }}>
-        PDF or Word, up to 10 MB. We read it to suggest profile fields — nothing is
+        PDF or Word, up to 4 MB. We read it to suggest profile fields — nothing is
         saved to your profile until you tick it below. Your date of birth, age,
         graduation years, photo and marital status are discarded on sight, even if
         your CV states them.

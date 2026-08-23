@@ -10,8 +10,28 @@ import { audit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
-/** RESUME-001 AC-3/4 — 10 MB, and only PDF or DOCX, checked by CONTENT. */
-const MAX_BYTES = 10 * 1024 * 1024;
+/**
+ * RESUME-001 AC-3/4 — the size cap, and only PDF or DOCX, checked by CONTENT.
+ *
+ * 4 MB, not the 10 MB this used to claim.
+ *
+ * Vercel Functions reject a request body over 4.5 MB at the platform edge,
+ * before any of this code runs. So a 6 MB CV never reached the check that was
+ * supposed to allow it: the candidate got a raw platform error instead of the
+ * sentence below, and nothing in the app could tell them what went wrong or
+ * what to do about it. Advertising a limit the deployment cannot honour is
+ * worse than a lower limit honestly stated.
+ *
+ * 4 leaves headroom under 4.5 for the multipart encoding overhead, which adds
+ * a few hundred bytes of boundary and headers on top of the file itself.
+ *
+ * Raising this is not a one-line change: above ~4.5 MB the upload has to go
+ * straight from the browser to blob storage, which moves the content sniffing
+ * and the extraction attempt to after the file is stored rather than before —
+ * and that ordering is deliberate (see the note by `extract` below).
+ */
+const MAX_MB = 4;
+const MAX_BYTES = MAX_MB * 1024 * 1024;
 
 const PDF_MIME = "application/pdf";
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -96,7 +116,11 @@ export async function POST(req: Request) {
 
   if (file.size > MAX_BYTES) {
     return NextResponse.json(
-      { error: "That file is over 10 MB. Please upload a smaller one.", code: "TOO_LARGE" },
+      {
+        error: `That file is over ${MAX_MB} MB. Most CVs are well under 1 MB — if yours is large it usually means a scanned page or an embedded photo, and exporting to PDF again will shrink it.`,
+        code: "TOO_LARGE",
+        maxBytes: MAX_BYTES,
+      },
       { status: 413 }
     );
   }

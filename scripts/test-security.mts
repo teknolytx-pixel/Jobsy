@@ -11,6 +11,7 @@
 import "dotenv/config";
 import assert from "node:assert/strict";
 import { gzipSync, deflateRawSync } from "node:zlib";
+import { readFileSync } from "node:fs";
 
 const { hashToken, newToken, issueToken, consumeToken, revokeTokens, secretEquals } = await import(
   "../src/lib/tokens"
@@ -546,6 +547,34 @@ await t("TC-RESUME-003-22", "an unknown field name cannot smuggle a value throug
   const patch = toProfilePatch(parsed, ["role", "isPlatformAdmin", "email"]);
   assert.deepEqual(patch, {}, "only the four known fields are ever emitted");
 });
+/**
+ * RESUME-001 AC-3 — the size cap has to survive the platform it runs on.
+ *
+ * Vercel Functions reject a request body over 4.5 MB before any route code
+ * runs, so a limit above that is not a limit — it is a promise the deployment
+ * cannot keep, and the candidate gets a raw platform error instead of our
+ * sentence. This reads the actual constants rather than restating them,
+ * because the failure mode being guarded is the two drifting apart.
+ */
+await t("TC-RESUME-001-30", "the upload limit fits under the platform body limit", () => {
+  const route = readFileSync("src/app/api/resumes/route.ts", "utf8");
+  const mb = Number(route.match(/const MAX_MB = (\d+)/)?.[1]);
+  assert.ok(Number.isFinite(mb), "MAX_MB not found in the upload route");
+  assert.ok(mb <= 4, `MAX_MB is ${mb}; Vercel rejects bodies over 4.5 MB before the route runs`);
+});
+
+await t("TC-RESUME-001-31", "the screen states the same limit the server enforces", () => {
+  const route = readFileSync("src/app/api/resumes/route.ts", "utf8");
+  const ui = readFileSync("src/app/resume/ResumeUpload.tsx", "utf8");
+  const serverMb = route.match(/const MAX_MB = (\d+)/)?.[1];
+  const clientMb = ui.match(/const MAX_MB = (\d+)/)?.[1];
+  assert.equal(clientMb, serverMb, "the client and server size limits have drifted apart");
+  assert.ok(
+    ui.includes(`up to ${serverMb} MB`),
+    `the upload screen does not tell the candidate the ${serverMb} MB limit`
+  );
+});
+
 await t("TC-RESUME-003-19", "an empty resume does not throw", () => {
   const empty = parseResume("");
   assert.equal(empty.parsed.roles.length, 0);
