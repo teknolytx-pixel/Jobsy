@@ -44,7 +44,8 @@
     "test:skillmatch": "tsx scripts/test-skill-matching.mts",
     "sources-status": "tsx scripts/sources-status.mts",
     "test:jobimport": "tsx scripts/test-job-import.mts",
-    "test:reccrit": "tsx scripts/test-recruiter-criteria.mts"
+    "test:reccrit": "tsx scripts/test-recruiter-criteria.mts",
+    "check-boards": "tsx scripts/check-boards.mts"
   },
   "dependencies": {
     "bcryptjs": "3.0.3",

@@ -83,7 +83,15 @@ const PATTERNS: Pattern[] = [
   },
 ];
 
-function matchPatterns(haystack: string): { kind: AtsKind; token: string } | null {
+/**
+ * Pure URL/HTML → {vendor, board token}. No network.
+ *
+ * Exported so tooling can resolve a careers URL the SAME way the Sources screen
+ * does. A second parser would drift, and the failure when it drifted would be a
+ * board that connects in the UI but not from the command line, or the reverse —
+ * with nothing to say which was right.
+ */
+export function matchPatterns(haystack: string): { kind: AtsKind; token: string } | null {
   for (const p of PATTERNS) {
     const m = haystack.match(p.re);
     if (m) {

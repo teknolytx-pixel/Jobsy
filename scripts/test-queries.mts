@@ -26,6 +26,11 @@
  */
 import "dotenv/config";
 
+// Inserts hundreds of fixture rows and deletes by tag prefix — never against
+// a live database. See scripts/_not-production.mts.
+const { assertNotProduction } = await import("./_not-production.mts");
+assertNotProduction("database queries");
+
 let pass = 0,
   fail = 0;
 

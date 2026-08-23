@@ -32,6 +32,11 @@
  */
 import "dotenv/config";
 
+// Inserts hundreds of fixture rows and deletes by tag prefix — never against
+// a live database. See scripts/_not-production.mts.
+const { assertNotProduction } = await import("./_not-production.mts");
+assertNotProduction("skill matching");
+
 const { db, jobs, companies, users, candidateSwipes } = await import("../src/db");
 const { candidateDeck, recruiterDeck } = await import("../src/lib/deck");
 const { normalizeSkills, extractSkillEvidence, extractSkills, rankByEvidence } = await import(

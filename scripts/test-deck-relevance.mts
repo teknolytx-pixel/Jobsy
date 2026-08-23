@@ -33,6 +33,11 @@
  * scoring function would have passed happily throughout.
  */
 import "dotenv/config";
+
+// Inserts hundreds of fixture rows and deletes by tag prefix — never against
+// a live database. See scripts/_not-production.mts.
+const { assertNotProduction } = await import("./_not-production.mts");
+assertNotProduction("deck relevance");
 const { db, jobs, companies, users, candidateSwipes } = await import("../src/db");
 const { candidateDeck } = await import("../src/lib/deck");
 const { eq, inArray, like } = await import("drizzle-orm");

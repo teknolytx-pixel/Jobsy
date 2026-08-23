@@ -46,7 +46,18 @@ export default function LoginForm({
   const [accepted, setAccepted] = useState(false);
   // CAN-001 / REC-001 — asked once, at signup, and it is permanent. Null until
   // chosen so the form cannot be submitted on a default nobody read.
-  const [role, setRole] = useState<"CANDIDATE" | "RECRUITER" | null>(null);
+  /**
+   * Pre-selected from ?role= when the home page sent them down a specific path.
+   *
+   * Only ever a PRE-selection: the choice is permanent once submitted, so the
+   * control stays visible and changeable. A link that silently decided which
+   * side of the marketplace somebody is on — from a query parameter they never
+   * saw — would be the one irreversible decision in the product made for them.
+   */
+  const roleParam = params.get("role")?.toUpperCase();
+  const [role, setRole] = useState<"CANDIDATE" | "RECRUITER" | null>(
+    roleParam === "CANDIDATE" || roleParam === "RECRUITER" ? roleParam : null
+  );
   const [err, setErr] = useState<string | null>(params.get("error"));
   const [notice, setNotice] = useState<string | null>(
     params.get("verified") ? "Your email is verified — welcome to Jobsy." : null
