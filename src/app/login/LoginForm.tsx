@@ -29,7 +29,14 @@ import { Icon, Logo } from "@/components/Icon";
 const TERMS_HREF = "/legal/terms";
 const PRIVACY_HREF = "/legal/privacy";
 
-export default function LoginForm({ linkedinEnabled }: { linkedinEnabled: boolean }) {
+export default function LoginForm({
+  linkedinEnabled,
+  showSetupHint = false,
+}: {
+  linkedinEnabled: boolean;
+  /** True only outside production — see the note further down. */
+  showSetupHint?: boolean;
+}) {
   const router = useRouter();
   const params = useSearchParams();
   const [signup, setSignup] = useState(params.get("mode") === "signup");
@@ -129,13 +136,28 @@ export default function LoginForm({ linkedinEnabled }: { linkedinEnabled: boolea
             </a>
             <div className="divider">or use email</div>
           </>
-        ) : (
+        ) : showSetupHint ? (
+          /*
+           * Setup instructions, and ONLY in development.
+           *
+           * This block used to render unconditionally whenever LinkedIn was
+           * unconfigured, which meant every real person arriving at the public
+           * sign-up page was told to "add LINKEDIN_CLIENT_ID and
+           * LINKEDIN_CLIENT_SECRET to .env". That is a maintenance note
+           * addressed to the developer, shown to the customer, on the screen
+           * where they are deciding whether this product looks finished.
+           *
+           * An unavailable sign-in option is not an error state that needs
+           * explaining. In production the LinkedIn button simply is not there,
+           * which is what every other site does with a provider it has not
+           * enabled.
+           */
           <div className="note" style={{ marginTop: 16 }}>
-            <b>LinkedIn sign-in is off.</b> Add <code>LINKEDIN_CLIENT_ID</code> and{" "}
-            <code>LINKEDIN_CLIENT_SECRET</code> to <code>.env</code> to switch it on — the OIDC tier
-            is self-serve and approves instantly.
+            <b>Dev note — LinkedIn sign-in is off.</b> Set <code>LINKEDIN_CLIENT_ID</code> and{" "}
+            <code>LINKEDIN_CLIENT_SECRET</code> to switch it on; the OpenID Connect tier is
+            self-serve and approves instantly. This notice is not shown in production.
           </div>
-        )}
+        ) : null}
 
         <form onSubmit={submit}>
           {signup ? (

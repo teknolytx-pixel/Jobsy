@@ -7,7 +7,12 @@ export const dynamic = "force-dynamic";
 export default function LoginPage() {
   return (
     <Suspense fallback={<div className="center">Loading…</div>}>
-      <LoginForm linkedinEnabled={env.linkedin.enabled} />
+      <LoginForm
+        linkedinEnabled={env.linkedin.enabled}
+        // Configuration advice belongs to whoever runs the deployment, not to
+        // the person trying to sign up on it.
+        showSetupHint={process.env.NODE_ENV !== "production"}
+      />
     </Suspense>
   );
 }
