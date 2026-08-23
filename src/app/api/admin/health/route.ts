@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, count, eq, gte, isNotNull, sql } from "drizzle-orm";
+import { and, count, eq, gte, isNotNull, isNull, sql } from "drizzle-orm";
 import { db, emailLogs, jobSources, resumes } from "@/db";
 import { requirePlatformAdmin, authErrorResponse } from "@/lib/auth";
 import { assess, currentConfig } from "@/lib/health";
@@ -28,7 +28,7 @@ export async function GET(req: Request) {
 
   const since = new Date(Date.now() - WINDOW_DAYS * 86_400_000);
 
-  const [byStatus, sources, resumeRows] = await Promise.all([
+  const [byStatus, sources, resumeRows, stored] = await Promise.all([
     db
       .select({ status: emailLogs.status, n: count() })
       .from(emailLogs)
@@ -46,6 +46,8 @@ export async function GET(req: Request) {
       })
       .from(resumes)
       .where(gte(resumes.createdAt, since)),
+    // All time, not the window: a CV uploaded last month is just as lost.
+    db.select({ n: count() }).from(resumes).where(isNull(resumes.deletedAt)),
   ]);
 
   const n = (s: string) => byStatus.find((r) => r.status === s)?.n ?? 0;
@@ -76,6 +78,7 @@ export async function GET(req: Request) {
     failingSources: sources.map((s) => ({ name: s.name ?? "source", error: s.error ?? "" })),
     resumeParseFailures: resumeRows[0]?.failed ?? 0,
     resumeUploads: resumeRows[0]?.total ?? 0,
+    resumesStored: stored[0]?.n ?? 0,
     config: currentConfig(expectedHosts),
   });
 

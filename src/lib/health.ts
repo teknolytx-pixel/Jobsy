@@ -1,4 +1,5 @@
 import { env } from "./env";
+import { usingBlob } from "./storage";
 
 /**
  * NFR-010 — monitoring for parsing, matching, messaging and notification
@@ -32,7 +33,7 @@ export type Severity = "CRITICAL" | "WARNING" | "OK";
 
 export type HealthFinding = {
   severity: Severity;
-  area: "EMAIL" | "CONFIG" | "INGESTION" | "PARSING";
+  area: "EMAIL" | "CONFIG" | "STORAGE" | "INGESTION" | "PARSING";
   title: string;
   /** What is actually wrong, in a sentence an operator can act on. */
   detail: string;
@@ -49,7 +50,16 @@ export type HealthInput = {
   resumeParseFailures: number;
   resumeUploads: number;
   /** Environment, passed in so this stays testable. */
-  config: { emailEnabled: boolean; appUrl: string; isProduction: boolean; expectedHosts: string[] };
+  config: {
+    emailEnabled: boolean;
+    appUrl: string;
+    isProduction: boolean;
+    expectedHosts: string[];
+    /** RESUME-001 — is there durable storage, or just the function's disk? */
+    usingBlob: boolean;
+  };
+  /** Resumes on record. Zero means nothing has been lost yet. */
+  resumesStored: number;
 };
 
 /**
@@ -148,6 +158,35 @@ export function assess(input: HealthInput): HealthFinding[] {
     }
   }
 
+  /**
+   * ── Where the CVs actually go ──
+   *
+   * Without BLOB_READ_WRITE_TOKEN, `storage.ts` falls back to writing files to
+   * the function's local disk. On Vercel that filesystem is destroyed when the
+   * instance shuts down, so every uploaded CV is deleted minutes later — while
+   * the database row, the parse result and the candidate's profile all survive
+   * and look completely healthy. A recruiter opening an application finds a
+   * broken download and no explanation.
+   *
+   * Reported whenever it is wrong in production, not only once files exist:
+   * the point is to catch it before the first candidate uploads, not after.
+   */
+  if (config.isProduction && !config.usingBlob) {
+    out.push({
+      severity: "CRITICAL",
+      area: "STORAGE",
+      title:
+        input.resumesStored > 0
+          ? `${input.resumesStored} uploaded CV${input.resumesStored === 1 ? " is" : "s are"} being written to disposable storage`
+          : "Uploaded CVs will not survive",
+      detail:
+        "BLOB_READ_WRITE_TOKEN is not set, so resume files go to the function's local disk. " +
+        "Vercel destroys that filesystem when the instance shuts down, usually within minutes. " +
+        "The database row and the parsed profile survive, so nothing looks wrong until someone tries to open the file.",
+      action: "Vercel → Storage → Create Database → Blob (Private), connected to this project. Then redeploy.",
+    });
+  }
+
   for (const s of input.failingSources) {
     out.push({
       severity: "WARNING",
@@ -188,5 +227,6 @@ export function currentConfig(expectedHosts: string[]): HealthInput["config"] {
     appUrl: env.appUrl,
     isProduction: process.env.NODE_ENV === "production",
     expectedHosts,
+    usingBlob: usingBlob(),
   };
 }

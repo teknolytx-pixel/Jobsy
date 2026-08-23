@@ -24,11 +24,13 @@ const base: HealthInput = {
   failingSources: [],
   resumeParseFailures: 0,
   resumeUploads: 0,
+  resumesStored: 0,
   config: {
     emailEnabled: true,
     appUrl: "https://jobsy.example.com",
     isProduction: true,
     expectedHosts: ["jobsy.example.com"],
+    usingBlob: true,
   },
 };
 
@@ -94,6 +96,30 @@ check("TC-HLT-35 a malformed app url is reported",
 check("TC-HLT-36 no expected hosts means no config finding",
   of({ config: { ...base.config, appUrl: "https://anything.example", expectedHosts: [] } })
     .filter((f) => f.area === "CONFIG").length === 0);
+
+console.log("\nSTORAGE — WHERE THE CVs GO\n");
+
+const noBlob = of({ config: { ...base.config, usingBlob: false } });
+check("TC-HLT-70 no durable storage in production is CRITICAL",
+  noBlob.some((f) => f.area === "STORAGE" && f.severity === "CRITICAL"));
+// Reported BEFORE anything is lost, not after. Waiting for the first casualty
+// is not monitoring.
+check("TC-HLT-71 reported even with zero resumes on record",
+  noBlob.some((f) => f.area === "STORAGE"));
+check("TC-HLT-72 and it counts what is already at risk",
+  /3 uploaded CVs/.test(
+    of({ resumesStored: 3, config: { ...base.config, usingBlob: false } })
+      .find((f) => f.area === "STORAGE")?.title ?? ""
+  ));
+check("TC-HLT-73 it explains why nothing LOOKS wrong",
+  /nothing looks wrong until someone tries to open the file/i.test(
+    noBlob.find((f) => f.area === "STORAGE")?.detail ?? ""
+  ));
+check("TC-HLT-74 local development is not an incident",
+  of({ config: { ...base.config, usingBlob: false, isProduction: false } })
+    .filter((f) => f.area === "STORAGE").length === 0);
+check("TC-HLT-75 a configured store is silent",
+  of({ resumesStored: 40 }).filter((f) => f.area === "STORAGE").length === 0);
 
 console.log("\nINGESTION AND PARSING\n");
 

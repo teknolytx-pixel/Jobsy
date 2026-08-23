@@ -39,7 +39,7 @@ type Compliance = {
 
 type Finding = {
   severity: "CRITICAL" | "WARNING" | "OK";
-  area: "EMAIL" | "CONFIG" | "INGESTION" | "PARSING";
+  area: "EMAIL" | "CONFIG" | "STORAGE" | "INGESTION" | "PARSING";
   title: string;
   detail: string;
   action: string | null;
