@@ -74,6 +74,15 @@ jobs:
           npm run test:compliance
           npm run test:security
 
+      # Database-backed, so it runs after Migrate rather than with the pure
+      # unit suites. These cover the SELECTION query — which rows reach the
+      # scorer — and a unit test cannot reach that. Both bugs they pin down
+      # were invisible to every suite above.
+      - name: Retrieval suites
+        run: |
+          npm run test:skillmatch
+          npm run test:deck
+
       - name: Build
         run: npm run build
 

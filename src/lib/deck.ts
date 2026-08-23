@@ -12,6 +12,9 @@ import {
 import { scoreJobForCandidate } from "./match";
 import { checkGeoEligibility, toCandidateGeo, toJobGeo } from "./geo";
 import { isSponsorshipEligible } from "./authorization";
+import { expandSkills, toSqlArrays } from "./matching/expansion";
+import { bestCredit } from "./matching/taxonomy";
+import { normalizeSkills } from "./skills";
 
 export type JobCard = {
   id: string; title: string; company: string; location: string; remote: string;
@@ -39,6 +42,19 @@ export type CandidateCard = {
   transferable: { skill: string; via: string | null }[];
   /** 0..1 — can they do the job at all. Gates the logistics features. */
   qualification: number;
+  /**
+   * CAND-002 — when the recruiter searched for specific skills, how this
+   * person covers each one. Empty when no skill search is active.
+   *
+   * `credit` is 1 for holding the skill outright, between 0 and 1 for holding
+   * a related one (`via` names it), and 0 for not having it. Every searched
+   * skill appears, including the ones they lack: a sourcing decision made on
+   * "has 3 of your 5" needs to show which two are missing, and a card that
+   * silently dropped them would be inviting the recruiter to assume five.
+   */
+  requested: { skill: string; via: string | null; credit: number }[];
+  /** 0..1 — weighted share of the searched skills covered. 0 with no search. */
+  requestedCoverage: number;
 };
 
 const DECK_SIZE = 25;
@@ -124,22 +140,50 @@ export async function candidateDeck(candidate: User): Promise<JobCard[]> {
   const where = and(...clauses);
 
   /**
-   * How many of the candidate's skills this posting names.
+   * How related this posting is to what the candidate can actually do.
    *
-   * Compared lower-cased because job skills arrive from a dozen sources with a
-   * dozen capitalisation habits. This is a coarse pre-filter, not the match: the
-   * engine still does alias and adjacency work afterwards, so a posting wanting
-   * "JS" still scores for a candidate who wrote "JavaScript". Its job is only to
-   * make sure such a posting is IN the pool to be scored.
+   * ── Why this is not a count ──
+   *
+   * This was `count(*)` over exact string equality, which quietly undid the
+   * work of the entire matching module. The engine credits Vue at 0.55 toward
+   * React and PySpark at 0.75 toward Databricks; this query credited them at
+   * zero. A Vue developer's pool was therefore chosen as though they had no
+   * relevant skills at all — every React job tied at 0, the pool filled by
+   * recency, and the engine was handed rows it would never have picked. It then
+   * scored those rows impeccably, which is why the symptom reads as "random
+   * jobs" rather than as bad ranking. The scoring was never wrong; it was being
+   * asked the wrong question.
+   *
+   * `expandSkills` produces the same relatedness the engine scores by, so the
+   * two steps now agree. Selection can only ADD rows that exact matching would
+   * have dropped; nothing here alters a score.
    */
-  const candSkills = (candidate.skills ?? []).map((x) => x.trim().toLowerCase()).filter(Boolean);
-  const overlap = candSkills.length
-    // Passed as ONE delimited string and split in SQL. Binding a JS array
-    // straight into `= any(...)` leaves the driver to guess the element type,
-    // and Postgres rejects it; a single text parameter has no such ambiguity
-    // and is still fully parameterised.
-    ? sql<number>`(select count(*) from unnest(${jobs.skills}) s
-                   where lower(s) = any(string_to_array(${candSkills.join("\u0001")}, chr(1))))`
+  const expanded = expandSkills(candidate.skills ?? []);
+  const { names: expNames, weights: expWeights } = toSqlArrays(expanded);
+
+  /**
+   * Summed weight of the expansion terms this posting names.
+   *
+   * Iterates the expansion (bounded to 300 terms) testing membership in the
+   * posting's skills, rather than the reverse, because a posting carries a
+   * handful of skills and the expansion is the larger, fixed-size side.
+   *
+   * Fast enough at the current corpus. If the jobs table reaches the order of
+   * 100k rows the fix is a lower-cased skills column with a GIN index — not a
+   * cached score, which would go stale the moment somebody edits their profile,
+   * and a profile edit is precisely the event that must re-rank.
+   */
+  const relatedness = expanded.length
+    ? sql<number>`(
+        select coalesce(sum(w.weight), 0)
+          from unnest(
+                 string_to_array(${expNames}, chr(1)),
+                 string_to_array(${expWeights}, chr(1))::float8[]
+               ) as w(name, weight)
+         where exists (
+                 select 1 from unnest(${jobs.skills}) s where lower(s) = w.name
+               )
+      )`
     : sql<number>`0`;
 
   /** Nearby beats far away, and anywhere beats a city they cannot reach. */
@@ -163,7 +207,7 @@ export async function candidateDeck(candidate: User): Promise<JobCard[]> {
     .orderBy(
       ...(candidate.profilingOptOut
         ? [desc(jobs.postedAt)]
-        : [desc(overlap), desc(proximity), desc(jobs.postedAt)])
+        : [desc(relatedness), desc(proximity), desc(jobs.postedAt)])
     )
     .limit(POOL);
 
@@ -244,7 +288,11 @@ export async function candidateDeck(candidate: User): Promise<JobCard[]> {
  * become a thing a recruiter dials up or down.
  */
 export type RecruiterFilters = {
-  /** Candidate must have ALL of these. Matched against the normalised set. */
+  /**
+   * Skills the recruiter is sourcing for. RANKS rather than excludes: coverage
+   * of these decides the order, and each one is reported on the card as held,
+   * held-via-a-related-skill, or missing. Nobody is dropped for lacking one.
+   */
   skills?: string[];
   minYearsExp?: number;
   maxYearsExp?: number;
@@ -275,22 +323,49 @@ export async function recruiterDeck(
   const jobGeo = toJobGeo(job);
 
   /**
-   * What this role actually asks for, lower-cased for comparison across the
-   * capitalisation habits of a dozen sources. Authored required/preferred
-   * skills (MATCH-002) win when present; otherwise the general list.
+   * What this search is actually looking for.
+   *
+   * Two sources, in priority order. The skills the recruiter typed into the
+   * search come FIRST, because they are a live statement of intent and
+   * `expandSkills` weights earlier entries higher; the posting's own skills
+   * follow as the standing definition of the role. A recruiter who has typed
+   * nothing still gets the role's skills, which is the previous behaviour.
+   *
+   * Authored required/preferred skills (MATCH-002) win over the general list.
    */
-  const jobSkills = [
+  const searchedSkills = (filters.skills ?? []).map((x) => x.trim()).filter(Boolean);
+  const roleSkills = [
     ...(job.requiredSkills ?? []),
     ...(job.preferredSkills ?? []),
     ...(job.skills ?? []),
   ]
-    .map((x) => x.trim().toLowerCase())
+    .map((x) => x.trim())
     .filter(Boolean);
-  const uniqueJobSkills = [...new Set(jobSkills)];
 
-  const skillCoverage = uniqueJobSkills.length
-    ? sql<number>`(select count(*) from unnest(${users.skills}) s
-                   where lower(s) = any(string_to_array(${uniqueJobSkills.join("\u0001")}, chr(1))))`
+  const intent = [...new Set([...searchedSkills, ...roleSkills])];
+  const expandedRole = expandSkills(intent);
+  const { names: roleNames, weights: roleWeights } = toSqlArrays(expandedRole);
+
+  /**
+   * Weighted coverage of that intent, the mirror of the candidate deck.
+   *
+   * This was `count(*)` over exact equality, with the same consequence in
+   * reverse: a recruiter sourcing for Databricks never reached a candidate who
+   * had written Spark, because the pool was chosen before anything understood
+   * that those are related. Now the pool is ranked by the same graph the engine
+   * scores with, so that candidate is fetched and then scored on their merits.
+   */
+  const skillCoverage = expandedRole.length
+    ? sql<number>`(
+        select coalesce(sum(w.weight), 0)
+          from unnest(
+                 string_to_array(${roleNames}, chr(1)),
+                 string_to_array(${roleWeights}, chr(1))::float8[]
+               ) as w(name, weight)
+         where exists (
+                 select 1 from unnest(${users.skills}) s where lower(s) = w.name
+               )
+      )`
     : sql<number>`0`;
 
   const jobCountry = (job.countryCode ?? "").trim().toUpperCase() || null;
@@ -336,13 +411,36 @@ export async function recruiterDeck(
      * their profile in a month was never in the running. On a growing user base
      * that gets steadily worse.
      */
-    .orderBy(...(jobSkills.length ? [desc(skillCoverage), desc(users.updatedAt)] : [desc(users.updatedAt)]))
+    .orderBy(
+      ...(expandedRole.length ? [desc(skillCoverage), desc(users.updatedAt)] : [desc(users.updatedAt)])
+    )
     .limit(POOL);
+
+  /**
+   * The searched skills in canonical form, so "databricks" typed by a recruiter
+   * and "Databricks" stored on a profile are the same thing.
+   */
+  const searchNorm = normalizeSkills(searchedSkills);
 
   return rows
     .map((c) => {
       const fit = scoreJobForCandidate(job, c);
       const geo = checkGeoEligibility(jobGeo, toCandidateGeo(c));
+
+      /**
+       * Coverage of what the recruiter typed, scored through the same adjacency
+       * graph the engine uses — so searching "Databricks" credits a candidate
+       * who wrote "Spark" at 0.8 rather than treating them as a non-match.
+       */
+      const candNorm = normalizeSkills(c.skills ?? []);
+      const requested = searchNorm.map((skill) => {
+        const { credit, via } = bestCredit(skill, candNorm);
+        return { skill, via: credit > 0 ? via : null, credit: Number(credit.toFixed(2)) };
+      });
+      const requestedCoverage = searchNorm.length
+        ? Number((requested.reduce((a, r) => a + r.credit, 0) / searchNorm.length).toFixed(3))
+        : 0;
+
       return {
         _excluded: fit.full.excluded,
         _geoEligible: geo.eligible,
@@ -373,6 +471,8 @@ export async function recruiterDeck(
         concerns: fit.full.concerns,
         transferable: fit.full.transferableSkills.map((t) => ({ skill: t.skill, via: t.via })),
         qualification: fit.full.qualification,
+        requested,
+        requestedCoverage,
       };
     })
     .filter((c) => !c._excluded)
@@ -396,14 +496,40 @@ export async function recruiterDeck(
       ) {
         return false;
       }
-      if (filters.skills?.length) {
-        const have = new Set(c.skills.map((s) => s.toLowerCase()));
-        if (!filters.skills.every((want) => have.has(want.toLowerCase()))) return false;
-      }
+      /**
+       * Skills are RANKED, not filtered.
+       *
+       * This used to require every searched skill, matched as an exact string:
+       * `filters.skills.every((want) => have.has(want.toLowerCase()))`. Two
+       * things were wrong with it. It could not see that Spark covers most of
+       * Databricks, so a search for one hid every holder of the other. And an
+       * all-or-nothing rule makes the fifth skill a recruiter idly adds as
+       * destructive as the first — four-of-five is usually the person you want
+       * to talk to, and they vanished silently.
+       *
+       * Coverage now drives the ORDER (below) and every searched skill is
+       * reported on the card, held or missing. A recruiter who genuinely wants
+       * a hard cut still has `minScore`, which is explicit about being one.
+       */
       return true;
     })
     .map(({ _excluded, _geoEligible, _sponsorshipEligible, ...card }) => card satisfies CandidateCard)
-    .sort((a, b) => b.score - a.score)
+    /**
+     * Coverage first when a skill search is active, then overall fit.
+     *
+     * Bucketed to one decimal on purpose. Comparing raw coverage would let a
+     * 0.02 difference — the gap between crediting a related skill at 0.8 and at
+     * 0.78 — outrank a candidate who is a far better fit on everything else.
+     * Rounding says "these cover about the same amount of what you asked for,
+     * so show the stronger candidate first", which is what a recruiter reading
+     * the list actually wants.
+     */
+    .sort((a, b) =>
+      searchNorm.length
+        ? Math.round(b.requestedCoverage * 10) - Math.round(a.requestedCoverage * 10) ||
+          b.score - a.score
+        : b.score - a.score
+    )
     .slice(0, DECK_SIZE);
 }
 

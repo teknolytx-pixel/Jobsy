@@ -12,9 +12,11 @@ import type { CandidateInput, JobInput } from "../src/lib/matching/engine";
 
 // Dynamic imports: tsx loads .ts through the CJS bridge, and a static named
 // import from a .mts ESM entry point doesn't see those exports.
-const { matchScore } = await import("../src/lib/matching/engine");
+import { createHash } from "node:crypto";
+const { matchScore, WEIGHTS } = await import("../src/lib/matching/engine");
 const { parseRequirements, extractMinYears } = await import("../src/lib/matching/requirements");
-const { roleFamily, skillCredit, familyCompatibility } = await import("../src/lib/matching/taxonomy");
+const { roleFamily, skillCredit, familyCompatibility, EDGES } = await import("../src/lib/matching/taxonomy");
+const { SKILL_ALIASES } = await import("../src/lib/skills");
 
 let pass = 0, fail = 0;
 const check = (label: string, ok: boolean, detail = "") => {
@@ -318,8 +320,47 @@ const asRequired = matchScore(
 );
 check("TC-REQ-48 missing a nice-to-have costs less than missing a must-have",
   asPreferred.score > asRequired.score, `${asPreferred.score} vs ${asRequired.score}`);
-check("TC-REQ-49 the model version records the change",
-  asPreferred.modelVersion === "2026-08-22.a", asPreferred.modelVersion);
+/**
+ * TC-REQ-49 — a model change must carry a version bump.
+ *
+ * ── Why this is a fingerprint and not a literal ──
+ *
+ * This assertion used to read `modelVersion === "2026-08-22.a"`, which does not
+ * test the rule it was written for. Pinning the literal fails on every
+ * legitimate version bump, and the only way to make it pass is to edit the
+ * expected string — so in practice it trains you to update it without thinking,
+ * which is precisely the reflex the rule exists to prevent. Worse, it never
+ * fired in the case that matters: change a WEIGHT and leave the version alone,
+ * and this test stayed green.
+ *
+ * MATCH-030's CI guard does not cover this either; it checks that no prohibited
+ * input is reachable from the engine, which is a different concern. So this was
+ * the only tripwire, and it was pointed the wrong way.
+ *
+ * The fingerprint covers everything that determines a score: the weights, the
+ * relatedness graph, and the skill vocabulary. Change any of them and this
+ * fails, telling you to bump MODEL_VERSION and record the new pair. Bump the
+ * version alone and it also fails, which catches a version invented for a
+ * change that never happened.
+ *
+ * Under NYC Local Law 144 an audit is of a SPECIFIC model. This pair is what
+ * lets someone say, later, which one a given ranking came from.
+ */
+const modelFingerprint = createHash("sha256")
+  .update(JSON.stringify({ WEIGHTS, EDGES, SKILL_ALIASES }))
+  .digest("hex")
+  .slice(0, 12);
+
+/** Update BOTH values together, in the same commit as the model change. */
+const RECORDED_MODEL = { fingerprint: "d9adb2d3cae5", version: "2026-08-23.a" };
+
+check("TC-REQ-49 the scoring model matches its recorded version",
+  modelFingerprint === RECORDED_MODEL.fingerprint &&
+    asPreferred.modelVersion === RECORDED_MODEL.version,
+  modelFingerprint === RECORDED_MODEL.fingerprint
+    ? `version ${asPreferred.modelVersion}, expected ${RECORDED_MODEL.version}`
+    : `the model changed (fingerprint ${modelFingerprint}, recorded ${RECORDED_MODEL.fingerprint}) — ` +
+      `bump MODEL_VERSION in engine.ts and update RECORDED_MODEL here`);
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

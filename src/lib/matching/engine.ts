@@ -67,7 +67,25 @@ import { parseRequirements, type Dealbreaker, type Requirements } from "./requir
  * change. That is a new model by the rule three paragraphs above, and this is
  * the first time that rule has been exercised.
  */
-export const MODEL_VERSION = "2026-08-22.a";
+/**
+ * 2026-08-23.a — the skill vocabulary changed, so scores change.
+ *
+ * Databricks, PySpark, PostgreSQL, MySQL, SQL Server, Oracle, MongoDB,
+ * DynamoDB, Cassandra, RabbitMQ, BigQuery, NLP and Computer Vision were being
+ * treated as ALIASES of a broader skill — different spellings of one thing —
+ * when they are separate skills that transfer. They are now distinct, with
+ * adjacency edges carrying the transfer credit.
+ *
+ * The effect on any individual score is small and can go either way: a
+ * candidate who wrote "Databricks" against a Databricks posting now scores an
+ * exact 1.0 where the collapse also gave them 1.0, but against a plain Spark
+ * posting they now earn 0.8 rather than a spurious 1.0. That second case is the
+ * point — the old number asserted an equivalence nobody had checked.
+ *
+ * This is a new model by the rule above, and the version is what lets a bias
+ * audit say which vocabulary a given ranking was produced under.
+ */
+export const MODEL_VERSION = "2026-08-23.a";
 
 export const WEIGHTS = {
   requiredSkills: 40,

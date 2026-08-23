@@ -29,7 +29,11 @@
 // ─────────────────────────────────────────────────────────────
 type Edge = [string, string, number];
 
-const EDGES: Edge[] = [
+/**
+ * Exported so a test can fingerprint the model, and so an LL144 assessor can be
+ * handed the actual relatedness table rather than a description of one.
+ */
+export const EDGES: Edge[] = [
   // --- frontend frameworks: concepts transfer, syntax doesn't ---
   ["React", "Vue", 0.55],
   ["React", "Angular", 0.5],
@@ -81,6 +85,77 @@ const EDGES: Edge[] = [
   ["Airflow", "Python", 0.4],
   ["Airflow", "dbt", 0.5],
   ["Kafka", "Distributed Systems", 0.6],
+
+  /*
+   * The edges that replace the aliases removed from skills.ts.
+   *
+   * These MUST exist, and the weights matter. Promoting Databricks out of the
+   * Spark alias list without an edge back to it would not have made matching
+   * more precise, it would have deleted a match: every profile written before
+   * the split holds the collapsed token. Splitting a skill and relating it are
+   * one change, not two.
+   */
+
+  // --- relational engines: the dialect differs, the discipline does not ---
+  ["SQL", "PostgreSQL", 0.85],
+  ["SQL", "MySQL", 0.85],
+  ["SQL", "SQL Server", 0.85],
+  ["SQL", "Oracle", 0.8],
+  ["PostgreSQL", "MySQL", 0.8],
+  ["PostgreSQL", "SQL Server", 0.65],
+  ["MySQL", "SQL Server", 0.65],
+  ["SQL Server", "Oracle", 0.65],
+  ["PostgreSQL", "Oracle", 0.6],
+
+  // --- non-relational stores ---
+  ["NoSQL", "MongoDB", 0.85],
+  ["NoSQL", "DynamoDB", 0.85],
+  ["NoSQL", "Cassandra", 0.85],
+  ["MongoDB", "DynamoDB", 0.6],
+  ["DynamoDB", "Cassandra", 0.55],
+  ["MongoDB", "Cassandra", 0.5],
+  ["DynamoDB", "AWS", 0.5],
+
+  // --- messaging ---
+  ["Kafka", "RabbitMQ", 0.6],
+  ["RabbitMQ", "Distributed Systems", 0.45],
+
+  /*
+   * The Spark cluster — the specific case a candidate reported.
+   *
+   * PySpark is Spark through Python, so the transfer is very high but not 1.0:
+   * a Scala Spark shop still asks about it. Databricks is a commercial platform
+   * built on Spark, so knowing it implies most of Spark but adds proprietary
+   * surface (Delta Lake, Unity Catalog) that Spark alone does not cover.
+   */
+  ["Spark", "PySpark", 0.9],
+  ["Spark", "Databricks", 0.8],
+  ["PySpark", "Databricks", 0.75],
+  ["PySpark", "Python", 0.7],
+  ["Databricks", "SQL", 0.4],
+  ["Databricks", "Snowflake", 0.5],
+
+  // --- warehouses ---
+  ["BigQuery", "SQL", 0.6],
+  ["BigQuery", "GCP", 0.75],
+  ["BigQuery", "Snowflake", 0.65],
+
+  // --- orchestration: same job, different tool ---
+  ["Airflow", "Dagster", 0.7],
+  ["Airflow", "Prefect", 0.7],
+  ["Dagster", "Prefect", 0.7],
+  ["Dagster", "Python", 0.4],
+  ["Prefect", "Python", 0.4],
+
+  // --- ML specialisms ---
+  ["Machine Learning", "NLP", 0.7],
+  ["Machine Learning", "Computer Vision", 0.7],
+  // Lower than either is to ML: the maths rhymes, the day job does not.
+  ["NLP", "Computer Vision", 0.45],
+  ["NLP", "LLM APIs", 0.6],
+  ["PyTorch", "Computer Vision", 0.5],
+  ["PyTorch", "NLP", 0.5],
+  ["TensorFlow", "Computer Vision", 0.5],
 
   // --- ML ---
   ["PyTorch", "TensorFlow", 0.75],
@@ -134,6 +209,21 @@ const ADJACENCY: Map<string, Map<string, number>> = (() => {
 export function skillCredit(need: string, have: string): number {
   if (need.toLowerCase() === have.toLowerCase()) return 1;
   return ADJACENCY.get(need)?.get(have) ?? 0;
+}
+
+/**
+ * Every skill related to `skill`, with its transfer weight.
+ *
+ * Exported so the RETRIEVAL layer can use the same graph the SCORER uses.
+ * Before this existed, deck.ts chose its candidate pool with exact string
+ * equality while the engine scored with aliases and adjacency — so a job the
+ * engine would have rated highly could be filtered out before the engine ever
+ * saw it. Two components disagreeing about what a skill is, with the weaker one
+ * deciding what gets shown.
+ */
+export function neighbours(skill: string): { skill: string; weight: number }[] {
+  const m = ADJACENCY.get(skill);
+  return m ? [...m.entries()].map(([s, weight]) => ({ skill: s, weight })) : [];
 }
 
 /** Best credit any of the candidate's skills gives toward one required skill. */

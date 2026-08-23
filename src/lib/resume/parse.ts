@@ -1,4 +1,4 @@
-import { normalizeSkills, extractSkills } from "../skills";
+import { normalizeSkills, extractSkills, rankByEvidence } from "../skills";
 
 /**
  * RESUME-003 — structured resume parsing.
@@ -157,10 +157,20 @@ export function parseResume(text: string): ParseOutcome {
 
   const summary = sections.summary.join(" ").trim() || null;
 
-  // Author-listed skills win; otherwise mine the whole document, which is what
-  // extractSkills already does well for job descriptions.
+  /**
+   * Author-listed skills win; otherwise mine the whole document, which is what
+   * extractSkills already does well for job descriptions.
+   *
+   * When the CV does list them, the list is kept ENTIRE — a candidate's own
+   * claim about themselves is not ours to prune — but reordered by how much the
+   * rest of the document backs each one up. A skills section is usually written
+   * alphabetically or by whatever came to mind, so its order carries little
+   * signal; "appears in three role descriptions" carries a lot. Since the first
+   * skills in this list are the ones weighted highest when choosing which jobs
+   * to fetch, that ordering is not cosmetic.
+   */
   const listedSkills = sections.skills.length
-    ? normalizeSkills(splitSkillList(sections.skills.join("\n")))
+    ? rankByEvidence(normalizeSkills(splitSkillList(sections.skills.join("\n"))), scrubbed)
     : [];
   const skills = listedSkills.length ? listedSkills : extractSkills(scrubbed);
 
