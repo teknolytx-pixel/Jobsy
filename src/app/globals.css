@@ -331,7 +331,7 @@ svg{stroke:currentColor}
  */
 @media (min-width:1080px){
   .shell{
-    max-width:660px;
+    max-width:600px;
     border-left:1px solid var(--line);
     border-right:1px solid var(--line);
     background:rgba(255,255,255,.014);
@@ -353,39 +353,26 @@ svg{stroke:currentColor}
 /* Large desktop. Wider still, but capped: a list row 1500px across forces the
    eye to travel the whole monitor to read one job title. */
 @media (min-width:1500px){
-  .shell{max-width:720px}
+  .shell{max-width:640px}
   .shell.fixed{max-width:540px}
 }
 
 /**
- * Form controls stop growing well before the column does.
+ * ONE COLUMN WIDTH, shared by everything.
  *
- * A single-line text input is not more usable for being wider — past roughly
- * 500px the caret ends up a long way from the label and the field reads as an
- * empty band. The first pass at these breakpoints widened the shell and let the
- * sign-in inputs stretch to 880px, which looked worse than the narrow layout it
- * replaced.
+ * The previous version capped .field, .btn, .note and friends at 520px while
+ * leaving .stat and the landing page's own headings to fill the shell. The
+ * result was visible on the landing page: the stats row and the intro ran to
+ * the full column while "Get started" and "I already have an account" stopped
+ * 140px short, so the page had two competing right edges.
  *
- * Textareas are exempt: more room genuinely helps when writing a paragraph.
- * Sheet buttons are exempt because a sheet is already a narrow container and a
- * capped button inside it would float oddly short of the edges.
+ * That cap was an aesthetic judgement about form inputs, and it bought a tidier
+ * sign-in screen at the cost of a rule that only SOME components obeyed. A
+ * narrower shell gets the same tidiness with no special cases and no component
+ * needing to know about it — so the per-component caps are gone and the column
+ * itself is the constraint.
  */
-@media (min-width:700px){
-  /* Cap the BLOCK, not the input inside it. Capping the control alone left the
-     inputs at 520px while the notice above them ran the full 660px, so the
-     column had a ragged right edge and nothing lined up with anything. */
-  .field,.two,.btn,.note,.err,.ok,.divider{max-width:520px}
-  /* A sheet is already a narrow container; capping inside it floats content
-     short of the edges for no reason. */
-  .sheet .btn,.sheet .field,.sheet .note{max-width:none}
-}
 
-/**
- * Pointer devices get hover affordances and a visible focus ring.
- *
- * WCAG 2.4.7 — the ring was previously only whatever the browser drew, and the
- * dark palette makes the default nearly invisible.
- */
 @media (hover:hover){
   .row:hover{border-color:rgba(255,255,255,.16)}
   .tabs button:hover,.tabs a:hover{color:var(--txt)}
