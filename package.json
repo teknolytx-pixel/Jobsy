@@ -23,7 +23,7 @@
     "guard": "tsx scripts/check-prohibited-inputs.mts",
     "test:compliance": "tsx scripts/test-compliance.mts",
     "test:security": "tsx scripts/test-security.mts",
-    "test:lifecycle": "npm run test:queries && tsx scripts/e2e-lifecycle.mjs",
+    "test:lifecycle": "npm run test:queries && npm run test:deck && tsx scripts/e2e-lifecycle.mjs",
     "verify": "npm run typecheck && npm run guard && npm run test && npm run build",
     "test:e2e:sources": "SEED_PASSWORD=local-e2e-password node scripts/e2e-sources.mjs",
     "maintenance": "tsx scripts/maintenance.mts",
@@ -39,7 +39,8 @@
     "make-admin": "tsx scripts/make-admin.mts",
     "test:ssrf": "tsx scripts/test-safefetch.mts",
     "email-check": "tsx scripts/email-check.mts",
-    "test:health": "tsx scripts/test-health.mts"
+    "test:health": "tsx scripts/test-health.mts",
+    "test:deck": "tsx scripts/test-deck-relevance.mts"
   },
   "dependencies": {
     "bcryptjs": "3.0.3",

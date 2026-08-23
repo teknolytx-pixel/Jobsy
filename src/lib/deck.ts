@@ -67,8 +67,86 @@ export async function candidateDeck(candidate: User): Promise<JobCard[]> {
       sql`(${jobs.postedById} IS NULL OR ${jobs.postedById} NOT IN ${blocked})`
     );
   }
-  const where = and(...clauses);
   const candGeo = toCandidateGeo(candidate);
+
+  /**
+   * ── Choosing the pool ──
+   *
+   * This query used to be `ORDER BY posted_at DESC LIMIT 400`, and everything
+   * clever in this codebase — geography, sponsorship, skill scoring — ran on
+   * whatever it happened to return. With a thousand jobs and nightly
+   * ingestion that is not a ranking problem, it is a visibility one: if 400
+   * jobs anywhere on earth were posted more recently than the roles a
+   * candidate could actually take, those roles were never considered. Not
+   * ranked low. Absent.
+   *
+   * A test reproducing the reported symptom returned an EMPTY deck: 450 recent
+   * foreign postings filled the pool, the geography filter correctly removed
+   * every one of them, and three ideal local matches were never fetched.
+   *
+   * So the pool is now chosen for eligibility and relevance, and the scoring
+   * engine ranks within it — which is the order those two steps should always
+   * have been in.
+   */
+
+  /**
+   * Countries this candidate could plausibly be eligible for.
+   *
+   * NARROWING ONLY. Every row this returns still goes through
+   * `checkGeoEligibility`, which is the authority; this exists so the pool is
+   * not spent on rows that authority will certainly reject. Cross-border
+   * matching is opt-in (CLP-004), so when it is off, same-country is the only
+   * way to be eligible and the filter is exact. When it is ON, the rules are
+   * richer than a country list can express, so we do not narrow at all rather
+   * than risk hiding something eligible.
+   */
+  const countryScope: string[] | null = (() => {
+    if (candGeo.internationalSearchEnabled) return null;
+    const set = new Set<string>();
+    const add = (c: string | null | undefined) => {
+      const v = (c ?? "").trim().toUpperCase();
+      if (v && v !== "XX" && v.length === 2) set.add(v);
+    };
+    add(candGeo.currentCountry);
+    add(candGeo.searchCountry);
+    candGeo.preferredCountries.forEach(add);
+    return set.size ? [...set] : null;
+  })();
+
+  if (countryScope) {
+    // A job with no resolved country is ineligible anyway
+    // (UNKNOWN_JOB_COUNTRY_IS_ELIGIBLE = false). Excluding it here stops it
+    // consuming a pool slot only to be discarded a moment later.
+    clauses.push(sql`${jobs.countryCode} IS NOT NULL`);
+    clauses.push(inArray(jobs.countryCode, countryScope));
+  }
+
+  const where = and(...clauses);
+
+  /**
+   * How many of the candidate's skills this posting names.
+   *
+   * Compared lower-cased because job skills arrive from a dozen sources with a
+   * dozen capitalisation habits. This is a coarse pre-filter, not the match: the
+   * engine still does alias and adjacency work afterwards, so a posting wanting
+   * "JS" still scores for a candidate who wrote "JavaScript". Its job is only to
+   * make sure such a posting is IN the pool to be scored.
+   */
+  const candSkills = (candidate.skills ?? []).map((x) => x.trim().toLowerCase()).filter(Boolean);
+  const overlap = candSkills.length
+    // Passed as ONE delimited string and split in SQL. Binding a JS array
+    // straight into `= any(...)` leaves the driver to guess the element type,
+    // and Postgres rejects it; a single text parameter has no such ambiguity
+    // and is still fully parameterised.
+    ? sql<number>`(select count(*) from unnest(${jobs.skills}) s
+                   where lower(s) = any(string_to_array(${candSkills.join("\u0001")}, chr(1))))`
+    : sql<number>`0`;
+
+  /** Nearby beats far away, and anywhere beats a city they cannot reach. */
+  const city = (candGeo.currentCity ?? "").trim().toLowerCase();
+  const proximity = city
+    ? sql<number>`(case when lower(coalesce(${jobs.city}, '')) = ${city} then 2 when ${jobs.remote} = 'REMOTE' then 1 else 0 end)`
+    : sql<number>`(case when ${jobs.remote} = 'REMOTE' then 1 else 0 end)`;
 
   const rows = await db
     .select({ job: jobs, company: companies, posterName: users.name })
@@ -76,7 +154,17 @@ export async function candidateDeck(candidate: User): Promise<JobCard[]> {
     .innerJoin(companies, eq(jobs.companyId, companies.id))
     .leftJoin(users, eq(jobs.postedById, users.id))
     .where(where)
-    .orderBy(desc(jobs.postedAt))
+    /**
+     * XPLAIN-003 — a candidate who opted out of profiling gets the same
+     * ELIGIBILITY narrowing (that is the law about where they may work, not a
+     * judgement about them) but no relevance ordering. Their pool, like their
+     * deck, is newest-first.
+     */
+    .orderBy(
+      ...(candidate.profilingOptOut
+        ? [desc(jobs.postedAt)]
+        : [desc(overlap), desc(proximity), desc(jobs.postedAt)])
+    )
     .limit(POOL);
 
   return rows
@@ -186,6 +274,27 @@ export async function recruiterDeck(
   const exclude = [...new Set([...seen.map((s) => s.candidateId), recruiter.id, ...blocked])];
   const jobGeo = toJobGeo(job);
 
+  /**
+   * What this role actually asks for, lower-cased for comparison across the
+   * capitalisation habits of a dozen sources. Authored required/preferred
+   * skills (MATCH-002) win when present; otherwise the general list.
+   */
+  const jobSkills = [
+    ...(job.requiredSkills ?? []),
+    ...(job.preferredSkills ?? []),
+    ...(job.skills ?? []),
+  ]
+    .map((x) => x.trim().toLowerCase())
+    .filter(Boolean);
+  const uniqueJobSkills = [...new Set(jobSkills)];
+
+  const skillCoverage = uniqueJobSkills.length
+    ? sql<number>`(select count(*) from unnest(${users.skills}) s
+                   where lower(s) = any(string_to_array(${uniqueJobSkills.join("\u0001")}, chr(1))))`
+    : sql<number>`0`;
+
+  const jobCountry = (job.countryCode ?? "").trim().toUpperCase() || null;
+
   const rows = await db
     .select()
     .from(users)
@@ -200,10 +309,34 @@ export async function recruiterDeck(
         eq(users.emailVerified, true),
         // AUTH-012 — a closed account disappears immediately, before the purge.
         sql`${users.deletionRequestedAt} IS NULL`,
-        sql`cardinality(${users.skills}) > 0`
+        sql`cardinality(${users.skills}) > 0`,
+        /**
+         * The same narrowing the candidate deck does, from the other side.
+         *
+         * Cross-border is opt-in for candidates (CLP-004), so a candidate whose
+         * country differs and who has not enabled international search cannot
+         * be eligible for this role — `checkGeoEligibility` below will reject
+         * them. Excluding them here stops them consuming pool slots that a
+         * reachable candidate needed.
+         */
+        ...(jobCountry
+          ? [
+              sql`(${users.currentCountry} = ${jobCountry} OR ${users.internationalSearchEnabled} = true)`,
+            ]
+          : [])
       )
     )
-    .orderBy(desc(users.updatedAt))
+    /**
+     * Ranked by how much of THIS ROLE'S requirement each candidate covers,
+     * not by who edited their profile most recently.
+     *
+     * `updatedAt DESC LIMIT 400` had the same failure as the candidate deck: a
+     * recruiter sourcing for a Databricks role got the 400 most recently active
+     * candidates and then scored them, so a perfect match who had not touched
+     * their profile in a month was never in the running. On a growing user base
+     * that gets steadily worse.
+     */
+    .orderBy(...(jobSkills.length ? [desc(skillCoverage), desc(users.updatedAt)] : [desc(users.updatedAt)]))
     .limit(POOL);
 
   return rows
