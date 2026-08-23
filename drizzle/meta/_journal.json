@@ -57,6 +57,13 @@
       "when": 1787393136719,
       "tag": "0007_military_korvac",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787520685846,
+      "tag": "0008_add_jsonld_crawl",
+      "breakpoints": true
     }
   ]
 }

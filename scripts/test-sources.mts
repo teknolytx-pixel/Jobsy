@@ -127,6 +127,10 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (host in TEXT_FIXTURES) {
     return new Response(TEXT_FIXTURES[host], { status: 200, headers: { "Content-Type": "text/html" } });
   }
+  // Detection reads robots.txt before it crawls anything. These fixtures are
+  // invented domains, so there is nothing to read — 404 means "no policy",
+  // which is the same answer a site without a robots.txt gives.
+  if (new URL(url).pathname === "/robots.txt") return new Response("", { status: 404 });
   // any unmapped feed-autodiscovery probe 404s, as it would in reality
   if (/\.(xml|rss)$/.test(new URL(url).pathname)) return new Response("", { status: 404 });
   return realFetch(input as RequestInfo, init);

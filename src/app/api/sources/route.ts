@@ -5,7 +5,7 @@ import { connectByUrl, connectDetected, listSources, SOURCE_KIND_LABEL } from "@
 import { ATS_KINDS } from "@/lib/providers/ats";
 import type { SourceKind } from "@/db";
 
-const ALL_KINDS = [...ATS_KINDS, "JSONLD", "XML_FEED"] as const satisfies readonly SourceKind[];
+const ALL_KINDS = [...ATS_KINDS, "JSONLD", "JSONLD_CRAWL", "XML_FEED"] as const satisfies readonly SourceKind[];
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;

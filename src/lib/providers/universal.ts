@@ -1,5 +1,7 @@
 import { extractSkills, inferSeniority } from "../skills";
 import { findJsonLdJobPostings } from "../discovery";
+import { CRAWL_LIMIT, fetchJobPages, fetchRobots, findJobPages } from "../crawl";
+import { safeFetch } from "../safeFetch";
 import {
   type NormalizedJob,
   inferEmploymentType,
@@ -54,12 +56,19 @@ function readSalary(node: Record<string, unknown>): [number | null, number | nul
   return [k(lo), k(hi), cur];
 }
 
-/** Scrape schema.org JobPosting records off a careers page. */
-export async function fetchJsonLdJobs(pageUrl: string, companyFallback?: string): Promise<NormalizedJob[]> {
-  const res = await fetch(pageUrl, { headers: UA, redirect: "follow", cache: "no-store" });
-  if (!res.ok) throw new Error(`${new URL(pageUrl).hostname} → HTTP ${res.status}`);
-  const html = (await res.text()).slice(0, 900_000);
-
+/**
+ * Turn one page's schema.org JobPosting records into jobs.
+ *
+ * Split out from the fetch so the crawler can reuse it. Two copies of this
+ * mapping would drift, and the drift would show up as jobs that import
+ * correctly from a listing page and wrongly from a detail page — with nothing
+ * to say which was right.
+ */
+export function jsonLdJobsFromHtml(
+  html: string,
+  pageUrl: string,
+  companyFallback?: string
+): NormalizedJob[] {
   const nodes = findJsonLdJobPostings(html);
   const origin = new URL(pageUrl).origin;
 
@@ -100,6 +109,51 @@ export async function fetchJsonLdJobs(pageUrl: string, companyFallback?: string)
       raw: { via: "jsonld", pageUrl },
     };
   });
+}
+
+/** Scrape schema.org JobPosting records off a careers page. */
+export async function fetchJsonLdJobs(pageUrl: string, companyFallback?: string): Promise<NormalizedJob[]> {
+  const res = await fetch(pageUrl, { headers: UA, redirect: "follow", cache: "no-store" });
+  if (!res.ok) throw new Error(`${new URL(pageUrl).hostname} → HTTP ${res.status}`);
+  const html = (await res.text()).slice(0, 900_000);
+  return jsonLdJobsFromHtml(html, pageUrl, companyFallback);
+}
+
+/**
+ * CRAWL a careers site whose structured data lives on the job pages.
+ *
+ * The common case, not an edge case. Google for Jobs wants JSON-LD on the page
+ * for one opening; almost nothing requires it on the index. So a site can be
+ * entirely readable and still look opaque if you only ever open the index —
+ * which is exactly what `fetchJsonLdJobs` does.
+ *
+ * Job pages are found by following links, or through the sitemap when the
+ * listing is rendered client-side. robots.txt is read first and honoured, and
+ * pages are fetched one at a time with the site's own Crawl-delay.
+ *
+ * Deduplicated by external id, because a job frequently appears under more than
+ * one URL — /job/1234/title and /en-us/job/1234/title being the usual pair.
+ */
+export async function crawlJsonLdJobs(
+  listingUrl: string,
+  companyFallback?: string,
+  limit = CRAWL_LIMIT
+): Promise<NormalizedJob[]> {
+  const page = await safeFetch(listingUrl);
+  if (!page.ok) throw new Error(`${new URL(listingUrl).hostname} → ${page.reason}`);
+
+  const rules = await fetchRobots(new URL(listingUrl).origin);
+  const { urls } = await findJobPages(page.finalUrl, page.body, rules, limit);
+
+  // The listing page itself sometimes carries records too. Free to check.
+  const jobs = jsonLdJobsFromHtml(page.body, page.finalUrl, companyFallback);
+
+  for (const p of await fetchJobPages(urls, rules)) {
+    jobs.push(...jsonLdJobsFromHtml(p.html, p.url, companyFallback));
+  }
+
+  const seen = new Set<string>();
+  return jobs.filter((j) => (seen.has(j.externalId) ? false : (seen.add(j.externalId), true)));
 }
 
 // ─────────────────────────────────────────────────────────────

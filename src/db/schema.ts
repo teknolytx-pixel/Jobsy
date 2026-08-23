@@ -83,7 +83,11 @@ export const jobSourceEnum = pgEnum("job_source", [
 export const sourceKindEnum = pgEnum("source_kind", [
   "GREENHOUSE", "LEVER", "ASHBY", "WORKABLE", "SMARTRECRUITERS",
   "RECRUITEE", "PERSONIO", "BAMBOOHR", "WORKDAY",
-  "JSONLD", "XML_FEED",
+  // JSONLD  — the listing page itself publishes schema.org JobPosting records.
+  // JSONLD_CRAWL — the listing publishes none, but the job pages it links to
+  //   (or the ones its sitemap names) do. This is the common shape: Google for
+  //   Jobs wants the data on the job page, not the index.
+  "JSONLD", "JSONLD_CRAWL", "XML_FEED",
 ]);
 
 export const sourceStatusEnum = pgEnum("source_status", ["PENDING", "OK", "FAILING", "DISABLED"]);

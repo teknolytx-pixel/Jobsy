@@ -1,0 +1,1 @@
+ALTER TYPE "public"."source_kind" ADD VALUE 'JSONLD_CRAWL' BEFORE 'XML_FEED';

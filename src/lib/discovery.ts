@@ -1,6 +1,8 @@
 import type { AtsKind } from "./providers/ats";
 import { safeFetch, type SafeFetchDeps } from "./safeFetch";
 import { ATS_LABEL } from "./providers/ats";
+import { recogniseVendor } from "./vendors";
+import { PROBE_LIMIT, fetchJobPages, fetchRobots, findJobPages, robotsAllows } from "./crawl";
 
 /**
  * CAREERS-URL AUTO-DETECTION.
@@ -9,7 +11,7 @@ import { ATS_LABEL } from "./providers/ats";
  * "https://acme.com/careers" and Jobsy figures out, on its own, how to keep
  * pulling every job Acme posts from that moment on.
  *
- * Four strategies, tried in order of reliability:
+ * Six strategies, tried in order of reliability:
  *
  *   1. URL fingerprint      — the careers URL IS an ATS URL
  *                             (boards.greenhouse.io/acme, acme.recruitee.com…)
@@ -17,17 +19,34 @@ import { ATS_LABEL } from "./providers/ats";
  *                             to an ATS; the token appears in an iframe src,
  *                             a script tag, or a link
  *   3. JSON-LD              — no known ATS, but the page publishes schema.org
- *                             JobPosting structured data (most modern career
- *                             sites do, because Google for Jobs requires it)
+ *                             JobPosting structured data
  *   4. Feed autodiscovery   — an <link rel="alternate"> XML/RSS job feed, or a
  *                             feed at a conventional path
+ *   5. Linked job pages     — the listing carries no structured data, but the
+ *                             jobs it links to do
+ *   6. Sitemap              — the listing is rendered client-side and links to
+ *                             nothing, but the sitemap lists every job
  *
- * Nothing here defeats an access control: every strategy reads data the company
- * publishes for exactly this purpose. If all four miss, we say so plainly and
- * offer the manual paths rather than guessing.
+ * ── Why 5 and 6 exist ──
+ *
+ * Strategy 3 was looking at the wrong page on most of the internet. Google for
+ * Jobs requires JSON-LD on the page for ONE opening, and nothing requires it on
+ * the index — so a site with clean structured data on four hundred job pages
+ * was being reported as publishing none, because we only ever opened the index.
+ * That single gap accounted for a large share of the sites we told recruiters
+ * we couldn't read.
+ *
+ * ── The limits, stated plainly ──
+ *
+ * Nothing here defeats an access control, executes JavaScript, or reads a
+ * private API. Every strategy reads what the company publishes for exactly this
+ * purpose, robots.txt is honoured before anything is crawled, and when a site
+ * genuinely publishes nothing machine-readable we name the system it runs on
+ * and say what to ask for. "Every career site works" is not a promise anyone
+ * can keep; being specific about which one this is, and why, is.
  */
 
-export type DetectionKind = AtsKind | "JSONLD" | "XML_FEED";
+export type DetectionKind = AtsKind | "JSONLD" | "JSONLD_CRAWL" | "XML_FEED";
 
 export type Detection = {
   kind: DetectionKind;
@@ -194,6 +213,30 @@ export async function detectSource(
    * hostname into the "careers page URL" field made our own server read it and
    * hand the result back. See src/lib/safeFetch.ts.
    */
+  /**
+   * robots.txt first, because everything below this line is a fetch.
+   *
+   * A site is entitled to say no, and some do: Citi's careers site disallows
+   * its own /search-jobs/ paths, which is the exact URL a recruiter would
+   * naturally paste. Reading it anyway would be both rude and, on a site that
+   * blocks bots at the edge, useless. Saying so is more helpful than a generic
+   * failure, because it tells the recruiter the problem is not their URL.
+   */
+  const rules = await fetchRobots(url.origin, deps);
+  if (!robotsAllows(rules, url.pathname + url.search)) {
+    const vendor = recogniseVendor(url.toString());
+    return {
+      kind: null,
+      reason:
+        `${url.hostname} asks crawlers not to read ${url.pathname} in its robots.txt, and Jobsy honours that.` +
+        (vendor ? ` The site runs on ${vendor.name}. ${vendor.ask}` : ""),
+      suggestions: [
+        "Try the page one level up — many sites disallow their search results but not the careers index itself.",
+        ...manualSuggestions(),
+      ],
+    };
+  }
+
   const fetched = await safeFetch(url.toString(), deps);
   if (!fetched.ok) {
     return { kind: null, reason: fetched.reason, suggestions: manualSuggestions() };
@@ -259,13 +302,62 @@ export async function detectSource(
     }
   }
 
+  // ── 5 + 6. the jobs themselves carry the structured data ──
+  //
+  // Found by following links, or through the sitemap when the listing is
+  // rendered client-side and links to nothing. Only a handful of pages are
+  // opened here: this is a question ("is this site readable?"), not an import.
+  const { urls, via } = await findJobPages(fetched.finalUrl, html, rules, PROBE_LIMIT, deps);
+  if (urls.length) {
+    for (const page of await fetchJobPages(urls, rules, deps)) {
+      const found = findJsonLdJobPostings(page.html);
+      if (!found.length) continue;
+      const org = found[0]?.hiringOrganization as { name?: string } | undefined;
+      return {
+        kind: "JSONLD_CRAWL",
+        token: fetched.finalUrl,
+        companyName: (org?.name ?? siteNameFrom(html) ?? domainName).slice(0, 80),
+        label: "Career site (job pages)",
+        confidence: "certain",
+        via:
+          via === "sitemap"
+            ? `The listing page is rendered in the browser, but the sitemap lists the individual jobs and each one publishes schema.org JobPosting data — the same data the site gives Google for Jobs.`
+            : `The listing page carries no structured data, but the jobs it links to do — each job page publishes schema.org JobPosting data.`,
+      };
+    }
+  }
+
+  // ── nothing machine-readable. Say what this actually is. ──
+  //
+  // The old message here listed three things we failed to find and gave the
+  // recruiter nothing to do about any of them. Naming the system the site runs
+  // on turns it into a request they can forward: every one of these platforms
+  // can emit an XML feed, and it is the same feed the employer already sends to
+  // Indeed, so the talent team usually just has to switch it on.
+  const vendor = recogniseVendor(url.toString()) ?? recogniseVendor(html.slice(0, 300_000));
+  if (vendor) {
+    return {
+      kind: null,
+      reason:
+        `${domainName} runs on ${vendor.name}, which Jobsy can't pull from automatically — it publishes no job feed or structured data on this page. ${vendor.ask}`,
+      suggestions: [
+        `Send the employer this: "Please share your ${vendor.name} job feed URL — the same XML feed you supply to Indeed."`,
+        "Once you have the feed URL, paste it here instead and it will connect in seconds.",
+        "In the meantime you can import individual jobs by URL from the Post a job screen.",
+      ],
+    };
+  }
+
   return {
     kind: null,
     reason:
-      "That page loaded, but it isn't on an ATS we recognise, publishes no JobPosting structured data, and exposes no job feed.",
+      `Jobsy read ${url.hostname} and everything it links to, and found nothing machine-readable: no ATS it recognises, no schema.org JobPosting data on the page or on the jobs, and no XML feed. That usually means the jobs only exist inside a JavaScript app.`,
     suggestions: manualSuggestions(),
   };
 }
+
+const siteNameFrom = (html: string): string | null =>
+  html.match(/<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']+)["']/i)?.[1]?.trim() ?? null;
 
 const manualSuggestions = () => [
   "Click through to the page that actually lists the jobs — many careers pages are just marketing, and the real board sits one link deeper.",

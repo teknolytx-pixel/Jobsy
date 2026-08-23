@@ -8,7 +8,7 @@ import {
 } from "@/db";
 import { detectSource, type Detection, type DetectionFailure } from "./discovery";
 import { ATS_LABEL, ATS_SOURCE, fetchCompanyJobs, type AtsKind } from "./providers/ats";
-import { fetchJsonLdJobs, fetchXmlFeedJobs } from "./providers/universal";
+import { crawlJsonLdJobs, fetchJsonLdJobs, fetchXmlFeedJobs } from "./providers/universal";
 import type { NormalizedJob } from "./providers/types";
 import { upsertJob } from "./ingest";
 
@@ -23,21 +23,24 @@ import { upsertJob } from "./ingest";
 export const SOURCE_KIND_LABEL: Record<SourceKind, string> = {
   ...ATS_LABEL,
   JSONLD: "Career site (structured data)",
+  JSONLD_CRAWL: "Career site (job pages)",
   XML_FEED: "XML job feed",
 };
 
-const isAts = (k: SourceKind): k is AtsKind => k !== "JSONLD" && k !== "XML_FEED";
+const UNIVERSAL = ["JSONLD", "JSONLD_CRAWL", "XML_FEED"] as const;
+const isAts = (k: SourceKind): k is AtsKind => !(UNIVERSAL as readonly string[]).includes(k);
 
 /** Fetch every job a connected source currently exposes. */
 export function fetchSourceJobs(src: Pick<JobSourceRow, "kind" | "token" | "companyName">): Promise<NormalizedJob[]> {
   if (isAts(src.kind)) return fetchCompanyJobs(src.kind, src.token, src.companyName);
   if (src.kind === "JSONLD") return fetchJsonLdJobs(src.token, src.companyName);
+  if (src.kind === "JSONLD_CRAWL") return crawlJsonLdJobs(src.token, src.companyName);
   return fetchXmlFeedJobs(src.token, src.companyName);
 }
 
 /** The `jobs.source` value rows from this connector should carry. */
 export const jobSourceFor = (k: SourceKind) =>
-  isAts(k) ? ATS_SOURCE[k] : k === "JSONLD" ? ("CAREER_SITE" as const) : ("XML_FEED" as const);
+  isAts(k) ? ATS_SOURCE[k] : k === "XML_FEED" ? ("XML_FEED" as const) : ("CAREER_SITE" as const);
 
 // ─────────────────────────────────────────────────────────────
 // CONNECT
