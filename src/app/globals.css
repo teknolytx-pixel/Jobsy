@@ -40,6 +40,35 @@ a{color:inherit;text-decoration:none}
 button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
 input,textarea,select{font:inherit}
 
+/**
+ * THE SHELL — and why this file needed breakpoints at all.
+ *
+ * Every screen renders inside `.shell`, which was `max-width:460px` with no
+ * media query anywhere in the application. On a phone that is right; it is what
+ * the layout was designed for. On anything else it is a phone-shaped strip
+ * marooned in the middle of the window. Measured on the sign-in screen:
+ *
+ *     iPhone SE   375px viewport   375px content      0px unused
+ *     iPad        768px viewport   460px content    308px unused   (40%)
+ *     Laptop     1440px viewport   460px content    980px unused   (68%)
+ *     Desktop    1920px viewport   460px content   1460px unused   (76%)
+ *
+ * Three quarters of a desktop screen showing nothing does not read as a mobile
+ * layout being reused. It reads as broken.
+ *
+ * ── The one distinction that matters ──
+ *
+ * `.shell.fixed` is the swipe deck and the chat thread. Those must NOT grow
+ * with the window: a swipe card the width of a desktop monitor is unusable, and
+ * chat bubbles that span 1400px are unreadable. They widen a little and stop.
+ *
+ * Plain `.shell` is everything else — lists, forms, profiles, the admin console
+ * — and those genuinely want the room.
+ *
+ * Splitting on a class that already exists is deliberate. The alternative was
+ * adding a modifier to 22 components, and a layout fix should not require
+ * touching 22 files it could break.
+ */
 .shell{max-width:460px;margin:0 auto;min-height:100dvh;display:flex;flex-direction:column;position:relative}
 .shell.fixed{height:100dvh;overflow:hidden}
 
@@ -191,7 +220,11 @@ header.top{display:flex;align-items:center;gap:10px;padding:14px 16px 10px;flex:
 
 /* ---- forms ---- */
 .field{display:block;margin-top:12px}
-.field>span{font-size:10.5px;text-transform:uppercase;letter-spacing:.8px;color:var(--dim2);font-weight:800}
+/* BLOCK, not inline. These labels only ever appeared above their input because
+   the input was width:100% and forced a wrap — the moment a max-width made the
+   input narrower than its container, "EMAIL" jumped up beside the box. A layout
+   that depends on a sibling being exactly full-width is not a layout. */
+.field>span{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.8px;color:var(--dim2);font-weight:800}
 .field input,.field textarea,.field select{width:100%;margin-top:5px;padding:11px 12px;border-radius:12px;
   background:var(--card);border:1px solid var(--line);color:var(--txt);outline:none}
 .field input:focus,.field textarea:focus,.field select:focus{border-color:rgba(61,111,240,.5)}
@@ -237,3 +270,121 @@ header.top{display:flex;align-items:center;gap:10px;padding:14px 16px 10px;flex:
 .sheet h3{display:flex}
 .row .s2{display:flex;flex-wrap:wrap}
 svg{stroke:currentColor}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   RESPONSIVE
+
+   These live at the END of the file on purpose. A media query adds
+   NO specificity, so `@media (min-width:1080px){ header.top{...} }`
+   placed above the plain `header.top{...}` rule loses to it — the
+   later declaration of equal specificity wins, media block or not.
+   The first draft of this section sat next to .shell near the top
+   and roughly half of its overrides silently did nothing.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Small phones. 16px of padding either side leaves little for a 4-digit salary
+   pill next to a location, so give the content back a few pixels. */
+@media (max-width:380px){
+  header.top,.tabs{padding-left:12px;padding-right:12px}
+  .roleswitch,.ctxbar{margin-left:12px;margin-right:12px}
+  .deckwrap,.list{margin-left:12px;margin-right:12px}
+  .list{padding-left:0;padding-right:0}
+  .card h2{font-size:17.5px}
+  .act{width:54px;height:54px;font-size:22px}
+}
+
+/* Landscape phone. Height, not width, is the constraint: a 340px minimum deck
+   plus header and actions does not fit in 390px of viewport, so the actions get
+   pushed off the bottom exactly when they are the only control that matters. */
+@media (max-height:500px) and (orientation:landscape){
+  .deckwrap{min-height:180px}
+  .actions{padding:8px 0 max(8px,env(safe-area-inset-bottom));gap:10px}
+  .act{width:44px;height:44px;font-size:18px}
+  .act.sm{width:36px;height:36px;font-size:14px}
+  .hint{display:none}
+}
+
+/* Tablet and small laptop. */
+@media (min-width:700px){
+  .shell{max-width:560px}
+  .shell.fixed{max-width:500px}
+  .deckwrap{min-height:420px}
+  .card h2{font-size:21px}
+  .sheet>.inner{max-width:560px;border-radius:24px;margin-bottom:24px}
+}
+
+/**
+ * Laptop and up.
+ *
+ * The shell gains a surface — hairline sides and a marginally lighter ground —
+ * so the app reads as a deliberate centred column rather than content that
+ * failed to fill the page. Without it, widening alone still looks like an
+ * accident on a large monitor.
+ */
+@media (min-width:1080px){
+  .shell{
+    max-width:660px;
+    border-left:1px solid var(--line);
+    border-right:1px solid var(--line);
+    background:rgba(255,255,255,.014);
+  }
+  /* The swipe deck keeps its card proportions and its own framing. */
+  .shell.fixed{max-width:520px}
+  .deckwrap{min-height:480px}
+  .list{padding-left:20px;padding-right:20px}
+  .row{padding:14px}
+  .row .t{font-size:15px}
+  header.top,.tabs{padding-left:20px;padding-right:20px}
+  .roleswitch,.ctxbar{margin-left:20px;margin-right:20px}
+  /* Four across instead of a cramped row of four eighths. */
+  .stat{gap:10px}
+  .stat b{font-size:22px}
+  .prose{padding-left:20px;padding-right:20px;font-size:14.5px}
+}
+
+/* Large desktop. Wider still, but capped: a list row 1500px across forces the
+   eye to travel the whole monitor to read one job title. */
+@media (min-width:1500px){
+  .shell{max-width:720px}
+  .shell.fixed{max-width:540px}
+}
+
+/**
+ * Form controls stop growing well before the column does.
+ *
+ * A single-line text input is not more usable for being wider — past roughly
+ * 500px the caret ends up a long way from the label and the field reads as an
+ * empty band. The first pass at these breakpoints widened the shell and let the
+ * sign-in inputs stretch to 880px, which looked worse than the narrow layout it
+ * replaced.
+ *
+ * Textareas are exempt: more room genuinely helps when writing a paragraph.
+ * Sheet buttons are exempt because a sheet is already a narrow container and a
+ * capped button inside it would float oddly short of the edges.
+ */
+@media (min-width:700px){
+  /* Cap the BLOCK, not the input inside it. Capping the control alone left the
+     inputs at 520px while the notice above them ran the full 660px, so the
+     column had a ragged right edge and nothing lined up with anything. */
+  .field,.two,.btn,.note,.err,.ok,.divider{max-width:520px}
+  /* A sheet is already a narrow container; capping inside it floats content
+     short of the edges for no reason. */
+  .sheet .btn,.sheet .field,.sheet .note{max-width:none}
+}
+
+/**
+ * Pointer devices get hover affordances and a visible focus ring.
+ *
+ * WCAG 2.4.7 — the ring was previously only whatever the browser drew, and the
+ * dark palette makes the default nearly invisible.
+ */
+@media (hover:hover){
+  .row:hover{border-color:rgba(255,255,255,.16)}
+  .tabs button:hover,.tabs a:hover{color:var(--txt)}
+}
+:where(a,button,input,textarea,select,[tabindex]):focus-visible{
+  outline:2px solid var(--blue);
+  outline-offset:2px;
+  border-radius:6px;
+}

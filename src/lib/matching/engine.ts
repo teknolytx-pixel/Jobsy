@@ -5,6 +5,7 @@ import {
   bestCredit,
   familyCompatibility,
   roleFamily,
+  skillFamilies,
   type RoleFamily,
 } from "./taxonomy";
 import { parseRequirements, type Dealbreaker, type Requirements } from "./requirements";
@@ -85,7 +86,28 @@ import { parseRequirements, type Dealbreaker, type Requirements } from "./requir
  * This is a new model by the rule above, and the version is what lets a bias
  * audit say which vocabulary a given ranking was produced under.
  */
-export const MODEL_VERSION = "2026-08-23.a";
+/**
+ * 2026-08-23.b — role family now reads skills, not just the headline.
+ *
+ * familyFit multiplies the entire skills block, and it was decided by one
+ * free-text headline. A candidate whose skills were AI/ML, Python and PySpark
+ * but whose headline read "Software Engineer" was classified FULLSTACK and
+ * scored 18% on a Machine Learning role against 43% on a Backend one — their
+ * results were not merely noisy, they were inverted.
+ *
+ * Three changes, all of which move scores:
+ *   - the candidate's skills now evidence role families of their own, and the
+ *     most favourable compatibility is used;
+ *   - FULLSTACK gained ML and DATA_SCIENCE entries, which were missing and so
+ *     fell to DEFAULT_CROSS (0.25) — stricter than FULLSTACK→DATA_ENG at 0.4;
+ *   - "ai", "artificial intelligence" and "generative ai" entered the
+ *     vocabulary, and compound entries like "AI/ML" are split.
+ *
+ * Scores rise for candidates whose headline understated them and are unchanged
+ * for everyone whose headline already matched their skills. Cross-profession
+ * gating is unaffected: a designer still scores 16% on a backend role.
+ */
+export const MODEL_VERSION = "2026-08-23.b";
 
 export const WEIGHTS = {
   requiredSkills: 40,
@@ -256,8 +278,44 @@ export function matchScore(job: JobInput, cand: CandidateInput): MatchResult {
   const concerns: string[] = [];
 
   const jobFamily = roleFamily(job.title, job.description);
-  const candidateFamily = roleFamily(cand.headline ?? "", cand.bio ?? "");
-  const familyFit = familyCompatibility(jobFamily, candidateFamily);
+
+  /**
+   * A candidate may credibly belong to more than one family, and we take the
+   * most favourable reading.
+   *
+   * ── Why ──
+   *
+   * This used to be `roleFamily(headline, bio)` alone. familyFit multiplies the
+   * ENTIRE skills block, so it is the most consequential single number in the
+   * model — and it was being decided by one free-text box that most people fill
+   * in generically. A candidate whose skills were AI/ML, Python and PySpark but
+   * whose headline said "Software Engineer" was classified FULLSTACK, and
+   * scored 18% on a Machine Learning role against 43% on a Backend one. Their
+   * skills said machine learning in every line; the headline outvoted them.
+   *
+   * Taking the MAXIMUM across every supported family is deliberate. It can only
+   * ever raise a score, so no candidate is penalised for describing themselves
+   * loosely, and there is a clean sentence for an LL144 assessor: we consider
+   * every role family the candidate's own evidence supports and use the most
+   * favourable. The alternative — picking one and hoping — is what produced the
+   * bug.
+   *
+   * The protection this gate exists for is untouched. It stops COINCIDENTAL
+   * token overlap across professions, and a Product Designer's skills evidence
+   * DESIGN, so a backend role still scores them at 0.25. What changes is only
+   * that skills now get a vote alongside the headline.
+   */
+  const headlineFamily = roleFamily(cand.headline ?? "", cand.bio ?? "");
+  const evidenced = skillFamilies(cand.skills);
+  const candidateFamilies: RoleFamily[] = [...new Set([headlineFamily, ...evidenced])];
+
+  const familyFit = Math.max(
+    ...candidateFamilies.map((f) => familyCompatibility(jobFamily, f))
+  );
+  /** The one that actually earned the score, so explanations stay truthful. */
+  const candidateFamily =
+    candidateFamilies.find((f) => familyCompatibility(jobFamily, f) === familyFit) ??
+    headlineFamily;
 
   // ---- skills ----
   const req = scoreSkillSet(reqs.required, cand.skills);

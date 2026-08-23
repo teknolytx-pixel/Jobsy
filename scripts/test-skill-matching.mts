@@ -39,6 +39,7 @@ const { normalizeSkills, extractSkillEvidence, extractSkills, rankByEvidence } =
 );
 const { expandSkills } = await import("../src/lib/matching/expansion");
 const { bestCredit } = await import("../src/lib/matching/taxonomy");
+const { matchScore } = await import("../src/lib/matching/engine");
 const { inArray, like } = await import("drizzle-orm");
 
 let pass = 0,
@@ -114,6 +115,89 @@ check("TC-SKILL-22 a listed skills section is reordered by evidence",
   reordered[0] === "Databricks", reordered.join(" → "));
 check("TC-SKILL-23 and nothing the candidate claimed is dropped",
   reordered.length === 3 && reordered.includes("Java"), reordered.join(" → "));
+
+// ─────────────────────────────────────────────────────────────
+console.log("\nAN AI/ML PROFILE\n");
+
+/**
+ * Reported directly: "my skills are AI/ML, Python and PySpark and I have been
+ * matched with irrelevant job postings."
+ *
+ * Three faults compounded, and the measured result was not merely noisy, it was
+ * inverted. Against this profile the engine scored a Machine Learning Engineer
+ * role at 18% and a Backend Engineer role at 43%.
+ *
+ *   a. "ai" was not in the skill vocabulary at all, so "AI/ML" was stored as
+ *      the literal token "AI/ ML" — matching nothing, adjacent to nothing, and
+ *      holding the TOP retrieval weight because it was listed first.
+ *   b. Nothing split compound entries, so even a recognised "AI" inside
+ *      "AI/ML" could not be reached.
+ *   c. Role family came from the headline alone. "Software Engineer" means
+ *      FULLSTACK, FULLSTACK had no ML entry, so ML roles took DEFAULT_CROSS
+ *      (0.25) on the entire skills block while backend roles took 0.85.
+ */
+const aiml = normalizeSkills(["AI/ ML", "Python", "Pyspark"]);
+check("TC-SKILL-60 AI/ML is recognised, not stored as raw text",
+  aiml.includes("Machine Learning"), JSON.stringify(aiml));
+check("TC-SKILL-61 and PySpark survives alongside it",
+  aiml.includes("PySpark") && aiml.includes("Python"), JSON.stringify(aiml));
+check("TC-SKILL-62 bare AI resolves too", normalizeSkills(["AI"]).includes("Machine Learning"));
+
+/** Splitting must not shred skills whose real names contain a slash. */
+check("TC-SKILL-63 CI/CD is not split", normalizeSkills(["CI/CD"]).includes("CICD"),
+  JSON.stringify(normalizeSkills(["CI/CD"])));
+check("TC-SKILL-64 PL/SQL is not split", normalizeSkills(["PL/SQL"]).includes("Oracle"),
+  JSON.stringify(normalizeSkills(["PL/SQL"])));
+check("TC-SKILL-65 an unknown compound is left intact",
+  normalizeSkills(["TCP/IP"]).includes("TCP/IP"), JSON.stringify(normalizeSkills(["TCP/IP"])));
+
+/** The headline is generic, as most are. The skills are not. */
+const mlCand = {
+  headline: "Software Engineer", bio: "", skills: aiml,
+  location: "Austin, TX", remotePref: "ANY" as const, salaryTarget: 150, yearsExp: 7,
+};
+const posting = (title: string, skills: string[]) => ({
+  title, description: `${title}. Requirements: ${skills.join(", ")}.`, skills,
+  location: "Austin, TX", remote: "ONSITE" as const,
+  salaryMin: 140, salaryMax: 190, seniority: "Senior",
+});
+
+const onMl = matchScore(posting("Machine Learning Engineer", ["Machine Learning", "PyTorch", "Python"]), mlCand);
+const onData = matchScore(posting("Data Engineer", ["PySpark", "Python", "SQL"]), mlCand);
+const onBackend = matchScore(posting("Backend Engineer", ["Python", "Django", "REST"]), mlCand);
+const onQa = matchScore(posting("QA Automation Engineer", ["Python", "Testing", "Selenium"]), mlCand);
+
+check("TC-SKILL-66 an ML role now outranks a backend one", onMl.score > onBackend.score,
+  `ML ${onMl.score}% vs backend ${onBackend.score}%`);
+check("TC-SKILL-67 and a data role does too", onData.score > onBackend.score,
+  `data ${onData.score}% vs backend ${onBackend.score}%`);
+check("TC-SKILL-68 the ML role is the best match of the four",
+  onMl.score === Math.max(onMl.score, onData.score, onBackend.score, onQa.score),
+  `ML ${onMl.score} | data ${onData.score} | backend ${onBackend.score} | QA ${onQa.score}`);
+check("TC-SKILL-69 a generic headline no longer caps the family multiplier",
+  onMl.familyFit === 1, `x${onMl.familyFit} as ${onMl.candidateFamily}`);
+
+/**
+ * The regression that matters. Family gating exists to stop coincidental token
+ * overlap across professions, and letting skills vote must not weaken it.
+ * A designer's skills evidence DESIGN, so a backend role still scores 0.25.
+ */
+const designer = {
+  headline: "Product Designer", bio: "",
+  skills: ["Figma", "Design Systems", "Prototyping", "User Research"],
+  location: "Austin, TX", remotePref: "HYBRID" as const, salaryTarget: 150, yearsExp: 7,
+};
+const designerOnBackend = matchScore(
+  posting("Senior Backend Engineer", ["Go", "SQL", "Kafka", "Design Systems"]), designer);
+check("TC-SKILL-70 a designer still does not rank on a backend role",
+  designerOnBackend.score < 35, `${designerOnBackend.score}%`);
+
+const recruiterPerson = {
+  headline: "Technical Recruiter", bio: "", skills: ["Recruiting", "Leadership"],
+  location: "Austin, TX", remotePref: "HYBRID" as const, salaryTarget: 150, yearsExp: 7,
+};
+check("TC-SKILL-71 nor a recruiter on an ML role",
+  matchScore(posting("ML Engineer", ["Machine Learning", "PyTorch", "Python"]), recruiterPerson).score < 30);
 
 // ─────────────────────────────────────────────────────────────
 console.log("\nEXPANSION\n");

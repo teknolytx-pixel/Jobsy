@@ -306,13 +306,20 @@ export function roleFamily(title: string, description = ""): RoleFamily {
  * Cross-family compatibility, 0..1, used as a multiplier on the skills score.
  * Anything not listed falls back to DEFAULT_CROSS.
  */
-const DEFAULT_CROSS = 0.25;
+export const DEFAULT_CROSS = 0.25;
 const SAME = 1;
 
-const CROSS: Partial<Record<RoleFamily, Partial<Record<RoleFamily, number>>>> = {
+export const CROSS: Partial<Record<RoleFamily, Partial<Record<RoleFamily, number>>>> = {
   FRONTEND: { FULLSTACK: 0.85, MOBILE: 0.6, DESIGN: 0.35, BACKEND: 0.45 },
-  BACKEND: { FULLSTACK: 0.85, PLATFORM: 0.65, DATA_ENG: 0.5, FRONTEND: 0.45 },
-  FULLSTACK: { FRONTEND: 0.85, BACKEND: 0.85, MOBILE: 0.55, PLATFORM: 0.5, DATA_ENG: 0.4 },
+  BACKEND: { FULLSTACK: 0.85, PLATFORM: 0.65, DATA_ENG: 0.5, FRONTEND: 0.45, ML: 0.35 },
+  /*
+   * ML and DATA_SCIENCE were absent here, so they fell to DEFAULT_CROSS (0.25)
+   * — harsher than FULLSTACK→DATA_ENG at 0.4, which cannot be right: a generalist
+   * engineer is not further from machine learning than from data engineering.
+   * That gap is most of why a generically-titled AI/ML candidate ranked backend
+   * roles above machine-learning ones.
+   */
+  FULLSTACK: { FRONTEND: 0.85, BACKEND: 0.85, MOBILE: 0.55, PLATFORM: 0.5, DATA_ENG: 0.4, ML: 0.4, DATA_SCIENCE: 0.4 },
   MOBILE: { FRONTEND: 0.6, FULLSTACK: 0.55 },
   PLATFORM: { BACKEND: 0.65, DATA_ENG: 0.45, SECURITY: 0.45, FULLSTACK: 0.5 },
   DATA_ENG: { DATA_SCIENCE: 0.6, ML: 0.5, BACKEND: 0.5, PLATFORM: 0.45 },
@@ -327,6 +334,84 @@ const CROSS: Partial<Record<RoleFamily, Partial<Record<RoleFamily, number>>>> = 
   SUPPORT: { SALES: 0.35, OPERATIONS: 0.35 },
   PEOPLE: { OPERATIONS: 0.35 },
 };
+
+/**
+ * Skills that identify a profession on their own.
+ *
+ * ── Why this exists ──
+ *
+ * `roleFamily` reads a headline. Most people write something generic in that
+ * box — "Software Engineer", "Senior Developer" — which classifies them
+ * FULLSTACK, and FULLSTACK is distant from ML and DATA_ENG. A candidate whose
+ * skills were AI/ML, Python and PySpark therefore scored 18% on a Machine
+ * Learning role and 43% on a Backend one: the family multiplier is applied to
+ * the ENTIRE skills block, so one vague free-text field was overruling
+ * everything they had actually said about themselves.
+ *
+ * ── What belongs in here ──
+ *
+ * ONLY discriminative skills. Python, SQL and Docker are used by everyone and
+ * appear nowhere below — a skill that does not narrow the profession would add
+ * noise to every profile that lists it. If you cannot name the job from the
+ * skill alone, leave it out.
+ */
+export const FAMILY_SKILLS: Partial<Record<RoleFamily, string[]>> = {
+  ML: ["Machine Learning", "Generative AI", "PyTorch", "TensorFlow", "NLP", "Computer Vision", "MLOps", "LLM APIs"],
+  DATA_ENG: ["Spark", "PySpark", "Databricks", "Airflow", "Dagster", "Prefect", "dbt", "Snowflake", "BigQuery", "Data Modeling"],
+  DATA_SCIENCE: ["Data Visualization", "D3.js"],
+  FRONTEND: ["React", "Vue", "Angular", "Svelte", "Next.js"],
+  BACKEND: ["Node.js", "Go", "Java", "C#", "PHP", "Ruby", "GraphQL", "REST", "Kafka", "RabbitMQ"],
+  PLATFORM: ["Kubernetes", "Terraform", "CICD", "Observability", "AWS", "GCP", "Azure"],
+  MOBILE: ["iOS", "Android", "Swift", "Kotlin", "React Native"],
+  DESIGN: ["Figma", "Design Systems", "Prototyping", "User Research", "Accessibility"],
+  SECURITY: ["Security"],
+  QA: ["Testing"],
+};
+
+const SKILL_TO_FAMILY: Map<string, RoleFamily> = (() => {
+  const m = new Map<string, RoleFamily>();
+  for (const [fam, list] of Object.entries(FAMILY_SKILLS)) {
+    for (const s of list ?? []) m.set(s.toLowerCase(), fam as RoleFamily);
+  }
+  return m;
+})();
+
+/** A family needs this share of the evidence to count as one of the candidate's. */
+const FAMILY_SHARE = 0.25;
+
+/** At most this many, so a long skill list cannot claim every profession. */
+const MAX_FAMILIES = 3;
+
+/**
+ * Which professions this skill set actually evidences, strongest first.
+ *
+ * Weighted by position, because the skills someone lists first are the ones
+ * they lead with. Returns an empty array when nothing discriminative is
+ * present — that is a real answer, not a failure, and the caller falls back to
+ * the headline.
+ */
+export function skillFamilies(skills: string[]): RoleFamily[] {
+  const list = (skills ?? []).filter(Boolean);
+  if (!list.length) return [];
+
+  const score = new Map<RoleFamily, number>();
+  let total = 0;
+  list.forEach((skill, i) => {
+    const fam = SKILL_TO_FAMILY.get(skill.trim().toLowerCase());
+    if (!fam) return;
+    // Same 1.0 → 0.6 shape used elsewhere for "listed first means more".
+    const w = list.length > 1 ? 1 - (i / (list.length - 1)) * 0.4 : 1;
+    score.set(fam, (score.get(fam) ?? 0) + w);
+    total += w;
+  });
+  if (!total) return [];
+
+  return [...score.entries()]
+    .filter(([, w]) => w / total >= FAMILY_SHARE)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, MAX_FAMILIES)
+    .map(([fam]) => fam);
+}
 
 export function familyCompatibility(jobFamily: RoleFamily, candFamily: RoleFamily): number {
   if (jobFamily === candFamily) return SAME;

@@ -15,7 +15,8 @@ import type { CandidateInput, JobInput } from "../src/lib/matching/engine";
 import { createHash } from "node:crypto";
 const { matchScore, WEIGHTS } = await import("../src/lib/matching/engine");
 const { parseRequirements, extractMinYears } = await import("../src/lib/matching/requirements");
-const { roleFamily, skillCredit, familyCompatibility, EDGES } = await import("../src/lib/matching/taxonomy");
+const { roleFamily, skillCredit, familyCompatibility, EDGES, CROSS, DEFAULT_CROSS, FAMILY_SKILLS } =
+  await import("../src/lib/matching/taxonomy");
 const { SKILL_ALIASES } = await import("../src/lib/skills");
 
 let pass = 0, fail = 0;
@@ -338,21 +339,27 @@ check("TC-REQ-48 missing a nice-to-have costs less than missing a must-have",
  * the only tripwire, and it was pointed the wrong way.
  *
  * The fingerprint covers everything that determines a score: the weights, the
- * relatedness graph, and the skill vocabulary. Change any of them and this
- * fails, telling you to bump MODEL_VERSION and record the new pair. Bump the
- * version alone and it also fails, which catches a version invented for a
- * change that never happened.
+ * relatedness graph, the skill vocabulary, the cross-family table and the
+ * skill-to-family map. Change any of them and this fails, telling you to bump
+ * MODEL_VERSION and record the new pair. Bump the version alone and it also
+ * fails, which catches a version invented for a change that never happened.
+ *
+ * The cross-family table and the skill-to-family map were MISSING from the
+ * first version of this fingerprint, which was a hole: both feed the family
+ * multiplier, and that multiplies the entire skills block. A change to either
+ * moves every score on the site and would have slipped through silently — the
+ * exact failure this check exists to catch.
  *
  * Under NYC Local Law 144 an audit is of a SPECIFIC model. This pair is what
  * lets someone say, later, which one a given ranking came from.
  */
 const modelFingerprint = createHash("sha256")
-  .update(JSON.stringify({ WEIGHTS, EDGES, SKILL_ALIASES }))
+  .update(JSON.stringify({ WEIGHTS, EDGES, SKILL_ALIASES, CROSS, DEFAULT_CROSS, FAMILY_SKILLS }))
   .digest("hex")
   .slice(0, 12);
 
 /** Update BOTH values together, in the same commit as the model change. */
-const RECORDED_MODEL = { fingerprint: "d9adb2d3cae5", version: "2026-08-23.a" };
+const RECORDED_MODEL = { fingerprint: "e770e3ce5f7b", version: "2026-08-23.b" };
 
 check("TC-REQ-49 the scoring model matches its recorded version",
   modelFingerprint === RECORDED_MODEL.fingerprint &&

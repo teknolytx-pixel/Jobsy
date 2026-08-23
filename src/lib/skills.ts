@@ -104,7 +104,22 @@ export const SKILL_ALIASES: Record<string, string[]> = {
   TensorFlow: ["tensorflow", "keras"],
   "LLM APIs": ["llm", "large language model", "openai", "anthropic", "claude", "gpt-4", "gpt4", "rag", "prompt engineering"],
   MLOps: ["mlops", "ml ops", "model deployment", "feature store"],
-  "Machine Learning": ["machine learning", "ml", "deep learning", "neural networks"],
+  /**
+   * "ai" was missing, which is how a profile reading "AI/ML, Python, PySpark"
+   * ended up storing the literal string "AI/ ML" — unmatchable, unrelated to
+   * anything in the graph, and holding the TOP retrieval weight because it was
+   * listed first. The candidate's most important skill was a dead token.
+   *
+   * "ai" is safe to match on a word boundary. It is not safe as a substring,
+   * which is why the extractor's boundary rules matter here more than most.
+   */
+  "Machine Learning": [
+    "machine learning", "ml", "ai", "a.i.", "artificial intelligence",
+    "deep learning", "neural networks", "ai/ml", "ml/ai",
+  ],
+  "Generative AI": [
+    "generative ai", "gen ai", "genai", "generative artificial intelligence",
+  ],
   // Distinct specialisms, not spellings of "Machine Learning". A CV team and an
   // NLP team do not interview the same way, and collapsing them meant a vision
   // engineer ranked identically to a language one on either posting.
@@ -148,11 +163,52 @@ export function normalizeSkill(raw: string): string {
   return LOOKUP.get(k) ?? raw.trim().replace(/\s+/g, " ");
 }
 
+/** Separators that join two skills into one entry. */
+const COMPOUND = /[/&]/;
+
+/**
+ * Split a compound entry like "AI/ML" or "Data & Analytics" — but only when
+ * doing so actually resolves something.
+ *
+ * ── Why the whole string is tried first ──
+ *
+ * Plenty of real skill names contain a slash: CI/CD, PL/SQL, TCP/IP, A/B
+ * Testing. Splitting eagerly would shred them. So the rule is:
+ *
+ *   1. If the WHOLE entry is a skill we know, keep it whole. Settles CI/CD and
+ *      PL/SQL, both of which are in the alias table.
+ *   2. Otherwise split, and accept the split ONLY if at least one part is a
+ *      skill we know. "React/Redux" splits (React resolves); "TCP/IP" does not
+ *      (neither part resolves), so it survives intact as the candidate wrote it.
+ *
+ * This matters because of how the failure looked: a profile reading "AI/ML,
+ * Python, PySpark" stored "AI/ ML" as one unrecognised token. It matched no
+ * job, related to nothing in the adjacency graph, and — being listed first —
+ * carried the highest weight when choosing which jobs to fetch. The single most
+ * important thing about that candidate was steering their results into nowhere.
+ */
+function splitCompound(entry: string): string[] {
+  const whole = entry.trim();
+  if (!whole) return [];
+  // Known as-is? Nothing to do. `normalizeSkill` returns the input unchanged
+  // when it does not recognise it, so identity means "not in the table".
+  if (normalizeSkill(whole).toLowerCase() !== whole.toLowerCase()) return [whole];
+  if (!COMPOUND.test(whole)) return [whole];
+
+  const parts = whole.split(COMPOUND).map((p) => p.trim()).filter(Boolean);
+  if (parts.length < 2) return [whole];
+
+  const anyKnown = parts.some((p) => normalizeSkill(p).toLowerCase() !== p.toLowerCase());
+  return anyKnown ? parts : [whole];
+}
+
 export function normalizeSkills(raw: string[]): string[] {
   const out = new Set<string>();
   for (const s of raw) {
-    const n = normalizeSkill(s);
-    if (n) out.add(n);
+    for (const part of splitCompound(s)) {
+      const n = normalizeSkill(part);
+      if (n) out.add(n);
+    }
   }
   return [...out];
 }
