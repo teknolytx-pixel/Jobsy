@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authErrorResponse, requirePlatformAdmin } from "@/lib/auth";
+import { errorResponse } from "@/lib/apiError";
 import { connectByUrl, connectDetected, listSources, SOURCE_KIND_LABEL } from "@/lib/sources";
 import { ATS_KINDS } from "@/lib/providers/ats";
 import type { SourceKind } from "@/db";
@@ -68,8 +69,7 @@ export async function GET() {
        * of having two error classes.
        */
       return (
-      authErrorResponse(e) ??
-      NextResponse.json({ error: (e as Error).message }, { status: 400 })
+      authErrorResponse(e) ?? errorResponse(e, "loading job sources")
     );
   }
 }
@@ -139,8 +139,7 @@ export async function POST(req: Request) {
     });
   } catch (e) {
     return (
-      authErrorResponse(e) ??
-      NextResponse.json({ error: (e as Error).message }, { status: 400 })
+      authErrorResponse(e) ?? errorResponse(e, "connecting that careers page")
     );
   }
 }

@@ -148,9 +148,18 @@ export default function SourcesManager({ initial }: { initial: Source[] }) {
         <div className="note" style={{ marginTop: 16 }}>
           <b>What gets detected.</b> Greenhouse, Lever, Ashby, Workable, SmartRecruiters, Recruitee,
           Personio, BambooHR and Workday boards — whether you paste the ATS link directly or the
-          company&rsquo;s own branded careers page. Not on any of those? Jobsy falls back to the
-          schema.org job data the page already publishes for Google, then to an XML feed. Worst case,
-          ask the employer for the feed URL they give Indeed — Jobsy reads that format too.
+          company&rsquo;s own branded careers page. Not on any of those? Jobsy reads the schema.org
+          job data the page publishes for Google, then an XML feed, then the individual job pages the
+          listing links to — and if the listing is built in the browser and links to nothing, the
+          site&rsquo;s sitemap. Jobsy checks robots.txt first and doesn&rsquo;t crawl sites that ask
+          it not to.
+          <br />
+          <br />
+          <b>When it can&rsquo;t.</b> Some large employers run systems that publish nothing a machine
+          can read — Radancy, Phenom, iCIMS, Taleo, SuccessFactors and others. Jobsy names the one
+          it found and gives you a sentence to send the employer: every one of those platforms can
+          switch on the same XML feed they already send to Indeed, and pasting that URL here connects
+          them in seconds.
         </div>
 
         <h4 style={{ margin: "22px 0 8px", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".9px", color: "var(--dim2)", fontWeight: 800 }}>

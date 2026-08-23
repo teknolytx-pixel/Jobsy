@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db, jobSources } from "@/db";
 import { authErrorResponse, requirePlatformAdmin } from "@/lib/auth";
+import { errorResponse } from "@/lib/apiError";
 import { syncSource } from "@/lib/sources";
 
 export const dynamic = "force-dynamic";
@@ -57,8 +58,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
        * of having two error classes.
        */
       return (
-      authErrorResponse(e) ??
-      NextResponse.json({ error: (e as Error).message }, { status: 400 })
+      authErrorResponse(e) ?? errorResponse(e, "syncing that source")
     );
   }
 }
@@ -101,8 +101,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
        * of having two error classes.
        */
       return (
-      authErrorResponse(e) ??
-      NextResponse.json({ error: (e as Error).message }, { status: 400 })
+      authErrorResponse(e) ?? errorResponse(e, "updating that source")
     );
   }
 }
@@ -131,8 +130,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
        * of having two error classes.
        */
       return (
-      authErrorResponse(e) ??
-      NextResponse.json({ error: (e as Error).message }, { status: 400 })
+      authErrorResponse(e) ?? errorResponse(e, "removing that source")
     );
   }
 }

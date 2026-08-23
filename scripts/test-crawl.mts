@@ -281,6 +281,40 @@ check("TC-CRAWL-93 rows are tagged as a career site", jobs.every((j) => j.source
 check("TC-CRAWL-94 the same job under two URLs imports once",
   new Set(jobs.map((j) => j.externalId)).size === jobs.length);
 
+
+// ─────────────────────────────────────────────────────────────
+console.log("\nWHAT A FAILURE LOOKS LIKE TO THE PERSON READING IT\n");
+
+const { describeError } = await import("../src/lib/apiError");
+
+/**
+ * The exact error an administrator was shown when the database had not been
+ * migrated yet: forty words of SQL, column names, table names and bound
+ * parameters — for a detection that had actually SUCCEEDED.
+ */
+const RAW_SQL_ERROR = new Error(
+  'Failed query: select "id", "kind", "token", "company_name", "careers_url", "auto_detected", ' +
+    '"detected_via", "enabled", "status", "last_error" from "job_sources" where ' +
+    '("job_sources"."kind" = $1 and "job_sources"."token" = $2) limit $3 params: ' +
+    "JSONLD_CRAWL,https://jobs.citi.com/search-jobs,1\n" +
+    'invalid input value for enum source_kind: "JSONLD_CRAWL"'
+);
+
+const behind = describeError(RAW_SQL_ERROR, "connecting that careers page");
+check("TC-CRAWL-100 a schema-behind error is recognised", behind.status === 503, `${behind.status}`);
+check("TC-CRAWL-101 and names the fix", /migration/i.test(behind.hint ?? ""), behind.hint ?? "—");
+check("TC-CRAWL-102 no SQL reaches the caller",
+  !/select |from "|params:|\$1/i.test(behind.error + (behind.hint ?? "")), behind.error);
+check("TC-CRAWL-103 nor do column or table names",
+  !/job_sources|company_name|detected_via/i.test(behind.error + (behind.hint ?? "")), behind.error);
+
+const generic = describeError(new Error("ECONNRESET reading upstream at 10.0.4.19:5432"), "syncing that source");
+check("TC-CRAWL-104 any other failure is generic", generic.status === 500, `${generic.status}`);
+check("TC-CRAWL-105 and leaks no internals",
+  !/10\.0\.|5432|ECONNRESET/.test(generic.error), generic.error);
+check("TC-CRAWL-106 but still says what was being attempted",
+  /syncing that source/.test(generic.error), generic.error);
+
 globalThis.fetch = realFetch;
 console.log(`\n${pass} passed, ${fail} failed  —  crawl\n`);
 process.exit(fail ? 1 : 0);
