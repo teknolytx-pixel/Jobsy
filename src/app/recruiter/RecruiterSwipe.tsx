@@ -224,7 +224,6 @@ export default function RecruiterSwipe({
           Matches{matches ? <span className="n">{matches}</span> : null}
         </a>
         <a href="/jobs">My posts{jobs.length ? <span className="n">{jobs.length}</span> : null}</a>
-        <a href="/sources">Companies</a>
       </div>
 
       {jobs.length ? (

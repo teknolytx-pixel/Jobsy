@@ -60,7 +60,6 @@ export default async function MyJobsPage() {
         <a href="/recruiter">Source</a>
         <a href="/matches">Matches</a>
         <button className="on">My posts{rows.length ? <span className="n">{rows.length}</span> : null}</button>
-        <a href="/sources">Companies</a>
       </div>
 
       <div className="list">

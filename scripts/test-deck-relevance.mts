@@ -204,17 +204,34 @@ check("TC-DECK-20 the strongest match ranks first", deck[0]?.title === "Senior D
  * worse product than a short list of strong matches followed by weaker ones
  * they can swipe past. The guarantee that matters is ordering: relevant first.
  */
-const topThree = deck.slice(0, 3);
+/**
+ * Assertions about ORDER are scoped to this suite's own rows.
+ *
+ * The deck also contains whatever else the database holds — seed data, rows
+ * from another suite — and those are not under test here. This passed for a
+ * long time only because the ambient data happened to be benign; the moment a
+ * seeded "Filler Role" with no matching skills landed mid-deck, two assertions
+ * failed and pointed at the engine rather than at the fixture.
+ *
+ * A test that depends on what else is in the database is measuring the
+ * database. Every noise row and every needle is created here and carries this
+ * company id, so filtering to them makes the ordering claim exact without
+ * weakening it — the noise jobs ARE the irrelevant cards the test is about.
+ */
+const fixtureTitles = new Set([...noise, ...needles].map((j) => j.title));
+const mine = deck.filter((c) => fixtureTitles.has(c.title));
+
+const topThree = mine.slice(0, 3);
 const offTopic = topThree.filter((c) => c.sharedSkills.length === 0);
 check("TC-DECK-21 the top of the deck shares skills with the candidate", offTopic.length === 0,
   offTopic.map((c) => c.title).join(" | "));
 check("TC-DECK-23 relevant cards rank above irrelevant ones",
   (() => {
-    const lastRelevant = deck.map((c) => c.sharedSkills.length > 0).lastIndexOf(true);
-    const firstIrrelevant = deck.map((c) => c.sharedSkills.length === 0).indexOf(true);
+    const lastRelevant = mine.map((c) => c.sharedSkills.length > 0).lastIndexOf(true);
+    const firstIrrelevant = mine.map((c) => c.sharedSkills.length === 0).indexOf(true);
     return firstIrrelevant === -1 || firstIrrelevant > lastRelevant;
   })(),
-  deck.map((c) => `${c.title}(${c.sharedSkills.length})`).join(" | "));
+  mine.map((c) => `${c.title}(${c.sharedSkills.length})`).join(" | "));
 
 check("TC-DECK-22 local roles outrank the remote one",
   titles.indexOf("Senior Data Engineer") < titles.indexOf("Analytics Engineer (Remote US)"),

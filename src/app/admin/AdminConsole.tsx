@@ -230,6 +230,12 @@ export default function AdminConsole({ email }: { email: string }) {
           Health
           {health?.findings.length ? <span className="n">{health.findings.length}</span> : null}
         </button>
+        {/*
+          ADM-006 — job sources live here, not in the recruiter area.
+          A link rather than a tab: the screen is substantial enough to own a
+          page, and it was already built as one.
+        */}
+        <a href="/sources">Job sources</a>
       </div>
 
       <div className="list">

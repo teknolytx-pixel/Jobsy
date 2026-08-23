@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { AuthError, requireUser } from "@/lib/auth";
+import { authErrorResponse, requirePlatformAdmin } from "@/lib/auth";
 import { connectByUrl, connectDetected, listSources, SOURCE_KIND_LABEL } from "@/lib/sources";
 import { ATS_KINDS } from "@/lib/providers/ats";
 import type { SourceKind } from "@/db";
@@ -10,9 +10,29 @@ const ALL_KINDS = [...ATS_KINDS, "JSONLD", "XML_FEED"] as const satisfies readon
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
+/**
+ * ADM-006 — job sources are a PLATFORM concern, not a recruiter one.
+ *
+ * Connecting a source subscribes the whole deployment to somebody's careers
+ * board: every posting it carries enters the corpus every candidate swipes
+ * through. Disabling or deleting one removes those postings for everyone. None
+ * of that is scoped to the person doing it, so none of it belongs to a
+ * recruiter account.
+ *
+ * ── What this replaces ──
+ *
+ * `requireUser()`. Any signed-in account — including a CANDIDATE — could list,
+ * connect, sync, disable and DELETE every job source on the platform. The
+ * /sources page checked for a recruiter, so the restriction looked real while
+ * the API underneath enforced nothing beyond being logged in.
+ *
+ * That is the exact failure the seat tests already guard against elsewhere
+ * ("permission checks are server-side, not UI-only"): a UI-only check is not a
+ * permission, it is a suggestion, and the API is the thing anyone can call.
+ */
 export async function GET() {
   try {
-    await requireUser();
+    await requirePlatformAdmin();
     const sources = await listSources();
     return NextResponse.json({
       sources: sources.map((s) => ({
@@ -33,8 +53,24 @@ export async function GET() {
       })),
       supportedKinds: ALL_KINDS,
     });
-  } catch {
-    return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+  } catch (e) {
+      /*
+       * `authErrorResponse` rather than a bespoke catch.
+       *
+       * These handlers translated their own errors and got it wrong in both
+       * directions: GET returned 401 "Not signed in" for everything, and POST
+       * mapped anything that was not an AuthError to 400. A signed-in candidate
+       * refused for lacking admin therefore received "400 Invalid input",
+       * which tells a client its request was malformed when the request was
+       * fine and the caller simply was not allowed.
+       *
+       * The shared helper distinguishes 401 from 403, which is the whole point
+       * of having two error classes.
+       */
+      return (
+      authErrorResponse(e) ??
+      NextResponse.json({ error: (e as Error).message }, { status: 400 })
+    );
   }
 }
 
@@ -53,7 +89,7 @@ const Body = z
 
 export async function POST(req: Request) {
   try {
-    const user = await requireUser();
+    const user = await requirePlatformAdmin();
     const parsed = Body.safeParse(await req.json().catch(() => ({})));
     if (!parsed.success) {
       return NextResponse.json(
@@ -102,7 +138,9 @@ export async function POST(req: Request) {
       },
     });
   } catch (e) {
-    const status = e instanceof AuthError ? 401 : 400;
-    return NextResponse.json({ error: (e as Error).message }, { status });
+    return (
+      authErrorResponse(e) ??
+      NextResponse.json({ error: (e as Error).message }, { status: 400 })
+    );
   }
 }

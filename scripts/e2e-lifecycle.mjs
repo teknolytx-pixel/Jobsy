@@ -11,6 +11,16 @@
  *   npm run build && npm start &
  *   node scripts/e2e-lifecycle.mjs
  */
+
+/**
+ * This suite queries the database DIRECTLY as well as driving the HTTP API, so
+ * it needs DATABASE_URL — and unlike every other script here it never loaded
+ * .env. In CI that went unnoticed because the workflow exports DATABASE_URL at
+ * the job level; run it from a plain shell and every direct query failed with
+ * "Failed query", which reads like a broken assertion rather than a missing
+ * variable.
+ */
+import "dotenv/config";
 const BASE = process.env.E2E_BASE ?? "http://localhost:3000";
 
 let pass = 0;
@@ -653,6 +663,40 @@ await t("TC-SEAT-003-01", "a plain recruiter cannot invite", async () => {
 
 await t("TC-SEAT-003-08", "a plain recruiter cannot start company verification", async () => {
   const r = await mate.post("/api/company/verify", { method: "DNS", domain: "example.com" });
+  eq(r.status, 403);
+});
+
+/**
+ * ADM-006 — job sources are administrator-only, enforced by the API.
+ *
+ * These endpoints were guarded by `requireUser()`, so any signed-in account —
+ * a candidate included — could list, connect, sync, disable and DELETE every
+ * job source on the platform. The /sources PAGE checked for a recruiter, which
+ * made the restriction look real while the API underneath enforced nothing.
+ *
+ * Connecting a source subscribes the whole deployment to a careers board and
+ * deleting one removes those postings for every candidate, so none of it is
+ * scoped to the person doing it. Asserted from BOTH a candidate and a plain
+ * recruiter, because the previous shape was "recruiters only, in the UI" and
+ * the fix has to close both.
+ */
+await t("TC-ADM-006-01", "a candidate cannot read the job sources", async () => {
+  const r = await cand.get("/api/sources");
+  eq(r.status, 403, "a candidate must not enumerate platform job sources");
+});
+
+await t("TC-ADM-006-02", "a candidate cannot connect a job source", async () => {
+  const r = await cand.post("/api/sources", { url: "https://boards.greenhouse.io/example" });
+  eq(r.status, 403);
+});
+
+await t("TC-ADM-006-03", "a plain recruiter cannot connect a job source either", async () => {
+  const r = await rec.post("/api/sources", { url: "https://boards.greenhouse.io/example" });
+  eq(r.status, 403, "sources are a platform concern, not a recruiter one");
+});
+
+await t("TC-ADM-006-04", "nor delete one", async () => {
+  const r = await rec.del("/api/sources/any-id");
   eq(r.status, 403);
 });
 
