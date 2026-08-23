@@ -51,6 +51,17 @@ type Health = {
   counts: Record<string, number>;
 };
 
+type Undelivered = {
+  id: string;
+  template: string;
+  status: string;
+  subject: string;
+  createdAt: string;
+  expiresAt: string | null;
+  expired: boolean;
+  link: string | null;
+};
+
 type Report = {
   id: string;
   kind: string;
@@ -89,6 +100,10 @@ export default function AdminConsole({ email }: { email: string }) {
   const [reports, setReports] = useState<Report[] | null>(null);
   const [compliance, setCompliance] = useState<Compliance | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
+  const [lookup, setLookup] = useState("");
+  const [undelivered, setUndelivered] = useState<Undelivered[] | null>(null);
+  const [revealed, setRevealed] = useState<Set<string>>(new Set());
+  const [lookupErr, setLookupErr] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ action: string; status: string; note: string }>({
     action: "NONE",
@@ -169,6 +184,22 @@ export default function AdminConsole({ email }: { email: string }) {
       setErr((e as Error).message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function findUndelivered() {
+    setLookupErr(null);
+    setUndelivered(null);
+    setRevealed(new Set());
+    try {
+      const res = await fetch(`/api/admin/emails?to=${encodeURIComponent(lookup.trim())}`, {
+        cache: "no-store",
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "Could not read that.");
+      setUndelivered(body.messages ?? []);
+    } catch (e) {
+      setLookupErr((e as Error).message);
     }
   }
 
@@ -468,6 +499,88 @@ export default function AdminConsole({ email }: { email: string }) {
           ) : (
             <div className="emptylist">Loading…</div>
           )
+        ) : null}
+
+        {/*
+          Shown only on the Health tab, and only while email is broken — the
+          endpoint refuses once a sending domain is configured, so this cannot
+          outlive the outage it exists for.
+        */}
+        {tab === "health" && health?.findings.some((f) => f.area === "EMAIL") ? (
+          <>
+            <div className="sect" style={{ marginTop: 22 }}>
+              <h4>Recover a locked-out user</h4>
+            </div>
+            <div className="err">
+              <Icon name="alert" size={14} />
+              <div>
+                <b>A reset link signs someone in.</b> While email is down these can be
+                read here so you can pass one on by hand. Every lookup is recorded
+                against the address you searched. Send a link only to the address it was
+                issued for, and only when you are certain who asked for it.
+              </div>
+            </div>
+
+            <div className="two" style={{ marginTop: 8 }}>
+              <label className="field" style={{ marginTop: 0 }}>
+                <span>Their email address</span>
+                <input
+                  value={lookup}
+                  onChange={(e) => setLookup(e.target.value)}
+                  placeholder="someone@example.com"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void findUndelivered();
+                  }}
+                />
+              </label>
+            </div>
+            <button className="btn ghost" disabled={!lookup.trim()} onClick={() => void findUndelivered()}>
+              <Icon name="search" size={15} /> Find undelivered messages
+            </button>
+
+            {lookupErr ? <div className="err">{lookupErr}</div> : null}
+
+            {undelivered?.length === 0 ? (
+              <div className="emptylist">
+                Nothing undelivered for that address in the last 7 days. Ask them to
+                request a new link, then look again.
+              </div>
+            ) : null}
+
+            {undelivered?.map((m) => (
+              <div key={m.id} className="row" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <b style={{ fontSize: 13.5 }}>{m.template.replace(/_/g, " ").toLowerCase()}</b>
+                  <span className={`badge ${m.expired ? "m" : "a"}`}>
+                    {m.expired ? "expired" : "still valid"}
+                  </span>
+                  <span className="s2" style={{ marginTop: 0, color: "var(--dim2)" }}>
+                    {new Date(m.createdAt).toLocaleString()}
+                  </span>
+                </div>
+
+                {m.expired ? (
+                  <div className="s2" style={{ marginTop: 0 }}>
+                    This link has expired, so it is of no use. Ask them to request a new
+                    one, then look again.
+                  </div>
+                ) : revealed.has(m.id) ? (
+                  <div
+                    className="s2"
+                    style={{ marginTop: 0, wordBreak: "break-all", color: "var(--txt)", fontFamily: "monospace" }}
+                  >
+                    {m.link ?? "No link found in this message."}
+                  </div>
+                ) : (
+                  // Hidden until asked for, so a shoulder-surfer or a screenshot
+                  // of this screen does not hand out working credentials.
+                  <button className="btn ghost" onClick={() => setRevealed((s) => new Set(s).add(m.id))}>
+                    <Icon name="key" size={14} /> Reveal the link
+                  </button>
+                )}
+              </div>
+            ))}
+          </>
         ) : null}
 
         <div className="s2" style={{ color: "var(--dim2)", marginTop: 18 }}>

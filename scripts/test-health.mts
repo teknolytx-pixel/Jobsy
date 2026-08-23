@@ -135,6 +135,19 @@ check("TC-HLT-51 an ordinary rate is not",
 check("TC-HLT-52 a tiny sample never triggers it",
   of({ resumeUploads: 2, resumeParseFailures: 2 }).filter((f) => f.area === "PARSING").length === 0);
 
+console.log("\nRECOVERY ENDPOINT — THE RULES IT DEPENDS ON\n");
+
+/**
+ * The endpoint that reveals an undelivered reset link is gated on email being
+ * broken. These pin the two facts it relies on, because if either changes the
+ * gate opens at the wrong time: it must report an EMAIL finding while email is
+ * unconfigured in production, and must NOT once it is configured.
+ */
+check("TC-HLT-80 an EMAIL finding exists while email is unconfigured",
+  of({ config: { ...base.config, emailEnabled: false } }).some((f) => f.area === "EMAIL"));
+check("TC-HLT-81 and disappears once email works and nothing has failed",
+  of({}).filter((f) => f.area === "EMAIL").length === 0);
+
 console.log("\nORDERING\n");
 const mixed = of({
   email: { ...base.email, failed: 1 },
