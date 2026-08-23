@@ -5,6 +5,7 @@ import { SwipeDeck, DeckActions, type DeckControls, type Dir } from "@/component
 import { Avatar, MatchOverlay, Sheet, useToast } from "@/components/ui";
 import { money, REMOTE_LABEL, SOURCE_LABEL } from "@/components/format";
 import { Icon, Logo } from "@/components/Icon";
+import { MIN_MATCH } from "@/lib/matching/engine";
 import SignOutButton from "@/components/SignOutButton";
 
 type JobCard = {
@@ -14,6 +15,7 @@ type JobCard = {
   applyMethod: "EASY" | "EXTERNAL"; applyUrl: string | null;
   source: string; sourceUrl: string | null; recruiterName: string | null;
   score: number; sharedSkills: string[]; missingSkills: string[]; reasons: string[];
+  tier: "STRONG" | "BELOW_BAR";
 };
 
 type ApplyState =
@@ -158,11 +160,24 @@ export default function CandidateSwipe({
         <div className="sect">
           <div className="fitrow">
             <span>Match score</span>
-            <b>{j.score}%</b>
+            <b className={j.tier === "BELOW_BAR" ? "under" : undefined}>{j.score}%</b>
           </div>
           <div className="fitbar">
-            <i style={{ width: `${j.score}%` }} />
+            <i className={j.tier === "BELOW_BAR" ? "under" : undefined} style={{ width: `${j.score}%` }} />
           </div>
+          {/*
+            MATCH-040 — say it on the card, not in a divider.
+
+            A deck is a stack of one card at a time, so there is nowhere to put
+            a "below this line" separator. The card itself has to carry the
+            distinction, or a 62% match looks exactly like an 85% one until you
+            read the number.
+          */}
+          {j.tier === "BELOW_BAR" ? (
+            <div className="underbar">
+              Below your {MIN_MATCH}% match bar — shown because you have seen the stronger matches
+            </div>
+          ) : null}
           {j.reasons.length ? <div className="why">{j.reasons.join(" · ")}</div> : null}
         </div>
 

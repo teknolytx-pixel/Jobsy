@@ -13,8 +13,9 @@ import type { CandidateInput, JobInput } from "../src/lib/matching/engine";
 // Dynamic imports: tsx loads .ts through the CJS bridge, and a static named
 // import from a .mts ESM entry point doesn't see those exports.
 import { createHash } from "node:crypto";
-const { matchScore, WEIGHTS } = await import("../src/lib/matching/engine");
-const { parseRequirements, extractMinYears } = await import("../src/lib/matching/requirements");
+const { matchScore, WEIGHTS, MIN_MATCH } = await import("../src/lib/matching/engine");
+const { parseRequirements, extractMinYears, UNSTRUCTURED_REQUIRED } =
+  await import("../src/lib/matching/requirements");
 const { roleFamily, skillCredit, familyCompatibility, EDGES, CROSS, DEFAULT_CROSS, FAMILY_SKILLS } =
   await import("../src/lib/matching/taxonomy");
 const { SKILL_ALIASES } = await import("../src/lib/skills");
@@ -350,16 +351,23 @@ check("TC-REQ-48 missing a nice-to-have costs less than missing a must-have",
  * moves every score on the site and would have slipped through silently — the
  * exact failure this check exists to catch.
  *
+ * UNSTRUCTURED_REQUIRED joined them for the same reason: how many mined skills
+ * count as mandatory decides the denominator of the skills score on roughly 980
+ * of the corpus. MIN_MATCH is included too, though it changes no score — it
+ * decides what a user is shown and told, and "what did this person see, and
+ * why" is the question an audit actually asks.
+ *
  * Under NYC Local Law 144 an audit is of a SPECIFIC model. This pair is what
  * lets someone say, later, which one a given ranking came from.
  */
 const modelFingerprint = createHash("sha256")
-  .update(JSON.stringify({ WEIGHTS, EDGES, SKILL_ALIASES, CROSS, DEFAULT_CROSS, FAMILY_SKILLS }))
+  .update(JSON.stringify({ WEIGHTS, EDGES, SKILL_ALIASES, CROSS, DEFAULT_CROSS, FAMILY_SKILLS,
+                          UNSTRUCTURED_REQUIRED, MIN_MATCH }))
   .digest("hex")
   .slice(0, 12);
 
 /** Update BOTH values together, in the same commit as the model change. */
-const RECORDED_MODEL = { fingerprint: "e770e3ce5f7b", version: "2026-08-23.b" };
+const RECORDED_MODEL = { fingerprint: "768bb87292c9", version: "2026-08-23.c" };
 
 check("TC-REQ-49 the scoring model matches its recorded version",
   modelFingerprint === RECORDED_MODEL.fingerprint &&

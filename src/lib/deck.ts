@@ -14,6 +14,7 @@ import { checkGeoEligibility, toCandidateGeo, toJobGeo } from "./geo";
 import { isSponsorshipEligible } from "./authorization";
 import { expandSkills, toSqlArrays } from "./matching/expansion";
 import { bestCredit } from "./matching/taxonomy";
+import { MIN_MATCH, tierFor, type MatchTier } from "./matching/engine";
 import { normalizeSkills } from "./skills";
 
 export type JobCard = {
@@ -29,6 +30,15 @@ export type JobCard = {
   transferable: { skill: string; via: string | null }[];
   /** 0..1 — can they do the job at all. Gates the logistics features. */
   qualification: number;
+  /**
+   * MATCH-040 — whether this cleared the quality bar (MIN_MATCH).
+   *
+   * BELOW_BAR cards are still returned and still swipeable; they rank after
+   * every strong match and the UI marks them. Withholding them entirely would
+   * mean a candidate in a thin market opens the app to nothing, unable to tell
+   * a quiet week from a broken product.
+   */
+  tier: MatchTier;
 };
 
 export type CandidateCard = {
@@ -55,6 +65,8 @@ export type CandidateCard = {
   requested: { skill: string; via: string | null; credit: number }[];
   /** 0..1 — weighted share of the searched skills covered. 0 with no search. */
   requestedCoverage: number;
+  /** MATCH-040 — see JobCard.tier. Below-bar candidates rank last, never hidden. */
+  tier: MatchTier;
 };
 
 const DECK_SIZE = 25;
@@ -249,6 +261,7 @@ export async function candidateDeck(candidate: User): Promise<JobCard[]> {
         concerns: fit.full.concerns,
         transferable: fit.full.transferableSkills.map((t) => ({ skill: t.skill, via: t.via })),
         qualification: fit.full.qualification,
+        tier: tierFor(fit.score),
       };
     })
     // A hard filter means "don't show this", not "show it last" — an onsite job
@@ -265,11 +278,21 @@ export async function candidateDeck(candidate: User): Promise<JobCard[]> {
     // changes is the ORDER: newest first instead of score-ranked. Withholding
     // the product because someone exercised a statutory right is retaliation,
     // which several of these statutes name explicitly.
-    .sort((a, b) =>
-      candidate.profilingOptOut
-        ? Date.parse(b.postedAt) - Date.parse(a.postedAt)
-        : b.score - a.score
-    )
+    /**
+     * MATCH-040 — every strong match first, then the near misses.
+     *
+     * Two keys, not one. Sorting by score alone would already put strong
+     * matches first, but it would not give the UI a place to say "everything
+     * from here is below your bar" — and a 71 next to a 69 would look like a
+     * continuum when the product is asserting a line between them. Tier makes
+     * the line explicit; score orders within each side of it.
+     */
+    .sort((a, b) => {
+      if (candidate.profilingOptOut) return Date.parse(b.postedAt) - Date.parse(a.postedAt);
+      const at = a.tier === "STRONG" ? 0 : 1;
+      const bt = b.tier === "STRONG" ? 0 : 1;
+      return at - bt || b.score - a.score;
+    })
     .slice(0, DECK_SIZE);
 }
 
@@ -473,6 +496,7 @@ export async function recruiterDeck(
         qualification: fit.full.qualification,
         requested,
         requestedCoverage,
+        tier: tierFor(fit.score),
       };
     })
     .filter((c) => !c._excluded)
@@ -524,12 +548,25 @@ export async function recruiterDeck(
      * so show the stronger candidate first", which is what a recruiter reading
      * the list actually wants.
      */
-    .sort((a, b) =>
-      searchNorm.length
-        ? Math.round(b.requestedCoverage * 10) - Math.round(a.requestedCoverage * 10) ||
-          b.score - a.score
-        : b.score - a.score
-    )
+    /**
+     * Strong matches first, then coverage of what was searched, then fit.
+     *
+     * Tier leads even when a skill search is active. A recruiter who typed
+     * "Databricks" wants Databricks people, but a 40%-overall candidate who
+     * happens to hold the token is not a better first call than an 80% one who
+     * holds it too — coverage decides the order WITHIN a tier, not across it.
+     */
+    .sort((a, b) => {
+      const at = a.tier === "STRONG" ? 0 : 1;
+      const bt = b.tier === "STRONG" ? 0 : 1;
+      if (at !== bt) return at - bt;
+      if (searchNorm.length) {
+        const cov =
+          Math.round(b.requestedCoverage * 10) - Math.round(a.requestedCoverage * 10);
+        if (cov) return cov;
+      }
+      return b.score - a.score;
+    })
     .slice(0, DECK_SIZE);
 }
 

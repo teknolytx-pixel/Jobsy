@@ -39,7 +39,8 @@ const { normalizeSkills, extractSkillEvidence, extractSkills, rankByEvidence } =
 );
 const { expandSkills } = await import("../src/lib/matching/expansion");
 const { bestCredit } = await import("../src/lib/matching/taxonomy");
-const { matchScore } = await import("../src/lib/matching/engine");
+const { matchScore, MIN_MATCH, tierFor } = await import("../src/lib/matching/engine");
+const { UNSTRUCTURED_REQUIRED } = await import("../src/lib/matching/requirements");
 const { inArray, like } = await import("drizzle-orm");
 
 let pass = 0,
@@ -441,6 +442,82 @@ check("TC-SKILL-56 a skill she lacks is reported, not hidden",
   JSON.stringify(her2?.requested ?? []));
 check("TC-SKILL-57 and lacking one no longer excludes her",
   Boolean(her2), her2 ? "present" : "MISSING FROM DECK");
+
+// ─────────────────────────────────────────────────────────────
+console.log("\nTHE 70% BAR\n");
+
+/**
+ * MATCH-040. The bar is only meaningful if two things hold at once: genuinely
+ * strong matches clear it, and weak ones do not get inflated over it.
+ *
+ * The second is the one worth guarding. Making a threshold look achievable by
+ * loosening the model until more things pass is the obvious failure mode, and
+ * it produces a number that means nothing. So the unstructured-requirements fix
+ * that made 70 reachable is checked here from BOTH directions.
+ */
+const feedPosting = {
+  title: "Senior Data Engineer",
+  description: `Join our platform team. You'll work with Python and Spark on our
+    Databricks lakehouse, orchestrating with Airflow, modelling in dbt, loading to
+    Snowflake, with SQL throughout. We also use Kubernetes, Terraform, AWS, Kafka
+    and Docker across the wider stack.`,
+  skills: ["Python","Spark","Databricks","Airflow","dbt","Snowflake","SQL","Kubernetes","Terraform","AWS","Kafka","Docker"],
+  requiredSkills: null, preferredSkills: null,
+  location: "Austin, TX", remote: "HYBRID" as const,
+  salaryMin: 150, salaryMax: 190, seniority: "Senior",
+};
+const de = (skills: string[]) => matchScore(feedPosting, {
+  headline: "Data Engineer", bio: "", skills: normalizeSkills(skills),
+  location: "Austin, TX", remotePref: "HYBRID" as const, salaryTarget: 160, yearsExp: 8,
+});
+
+const strongDe = de(["Python","Spark","Databricks","Airflow","SQL"]);
+const weakDe = de(["Figma","Prototyping"]);
+
+check("TC-SKILL-80 a strong match clears the bar on a feed posting",
+  strongDe.score >= MIN_MATCH, `${strongDe.score}% vs bar ${MIN_MATCH}`);
+check("TC-SKILL-81 an unrelated candidate is nowhere near it",
+  weakDe.score < 30, `${weakDe.score}%`);
+
+/**
+ * The guard against inflation. Before the requirements change every mined skill
+ * was mandatory, and this posting names twelve — so the strong engineer scored
+ * 64 and could not clear the bar however qualified they were. Demoting the tail
+ * to preferred is what made 70 reachable, and it must not have lifted the
+ * unrelated candidate at all.
+ */
+check("TC-SKILL-82 a mentioned technology is not a mandatory one",
+  strongDe.requirements.required.length === UNSTRUCTURED_REQUIRED &&
+    strongDe.requirements.preferred.length > 0,
+  `required ${strongDe.requirements.required.length}, preferred ${strongDe.requirements.preferred.length}`);
+check("TC-SKILL-83 and the tail is demoted, never discarded",
+  strongDe.requirements.required.length + strongDe.requirements.preferred.length >= 12,
+  `${strongDe.requirements.required.length + strongDe.requirements.preferred.length} skills accounted for`);
+
+/** Tiering is a pure function of the score — nothing else may move the line. */
+check("TC-SKILL-84 the tier follows the score", tierFor(MIN_MATCH) === "STRONG" &&
+  tierFor(MIN_MATCH - 1) === "BELOW_BAR" && tierFor(99) === "STRONG" && tierFor(1) === "BELOW_BAR");
+
+/**
+ * DB-backed: the deck must order by tier and must NOT go empty.
+ *
+ * The corpus here contains nothing this candidate matches well, which is
+ * exactly the thin-market case the "hide everything below the bar" design would
+ * have turned into a blank screen.
+ */
+const thinDeck = await candidateDeck(cand);
+check("TC-SKILL-85 a deck with no strong match is still not empty",
+  thinDeck.length > 0, `${thinDeck.length} cards`);
+check("TC-SKILL-86 every below-bar card is flagged as such",
+  thinDeck.every((c) => (c.score >= MIN_MATCH) === (c.tier === "STRONG")),
+  thinDeck.slice(0, 4).map((c) => `${c.score}%${c.tier === "STRONG" ? "" : "*"}`).join(" "));
+check("TC-SKILL-87 no below-bar card outranks a strong one",
+  (() => {
+    const lastStrong = thinDeck.map((c) => c.tier === "STRONG").lastIndexOf(true);
+    const firstBelow = thinDeck.findIndex((c) => c.tier === "BELOW_BAR");
+    return firstBelow === -1 || lastStrong === -1 || firstBelow > lastStrong;
+  })(),
+  thinDeck.map((c) => c.tier === "STRONG" ? "S" : "b").join(""));
 
 await cleanup();
 console.log(`\n${pass} passed, ${fail} failed  —  skill matching\n`);

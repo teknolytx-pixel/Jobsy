@@ -35,6 +35,16 @@ export type Dealbreaker =
   | { kind: "ONSITE_ONLY"; detail: string }
   | { kind: "LICENSE"; detail: string };
 
+/**
+ * How many skills count as REQUIRED on a posting with no stated requirements.
+ *
+ * Six, because that is roughly what a real job ad asks for when it bothers to
+ * be specific, and because the skills arrive in evidence order so the first six
+ * are the ones the description actually dwells on. Everything after is demoted
+ * to preferred, not discarded.
+ */
+export const UNSTRUCTURED_REQUIRED = 6;
+
 /** Headings that introduce hard requirements. */
 const REQUIRED_HEADINGS =
   /(?:^|\n)\s*(?:what (?:you|we)(?:'ll| will)? need|requirements?|qualifications?|must[- ]haves?|minimum qualifications?|basic qualifications?|you have|about you|who you are|we(?:'|’)re looking for)\s*:?\s*(?:\n|$)/i;
@@ -174,15 +184,40 @@ export function parseRequirements(job: {
   const structured = fromRequired.length > 0;
 
   if (!structured) {
-    // No parseable structure. Anything explicitly tagged on the job is the best
-    // evidence we have; skills mined from prose are weaker, so demote those.
+    /**
+     * No parseable structure — about 980 of the corpus, because aggregator
+     * feeds truncate the body and lose the "Requirements:" heading with it.
+     *
+     * ── Why only the first few are required ──
+     *
+     * This used to promote EVERY tagged skill to a hard requirement, up to
+     * twelve. But a tagged skill on an unstructured posting is not a stated
+     * requirement; it is a technology the description happened to mention, and
+     * `extractSkills` will happily return a dozen from any well-written job ad.
+     * Demanding all twelve is a bar no real person clears, so a genuinely
+     * strong candidate scored like a weak one and the whole ingested corpus sat
+     * artificially low.
+     *
+     * The tagged list is in evidence order (most-mentioned first, see
+     * extractSkillEvidence), so the leading few really are what the posting is
+     * about. The tail is demoted to preferred rather than dropped — it still
+     * counts, at the lower weight, which is what "mentioned once near the
+     * bottom" is worth.
+     *
+     * Note this can only RAISE scores on unstructured postings, and only for
+     * candidates who match the leading skills. It does not help someone who
+     * matches nothing: the required block still has to be earned.
+     */
     const mined = extractSkills(text, 12);
     if (tagged.length) {
-      required = tagged;
-      preferred = mined.filter((s) => !tagged.includes(s));
+      required = tagged.slice(0, UNSTRUCTURED_REQUIRED);
+      preferred = [
+        ...tagged.slice(UNSTRUCTURED_REQUIRED),
+        ...mined.filter((s) => !tagged.includes(s)),
+      ];
     } else {
-      required = mined.slice(0, 6);
-      preferred = mined.slice(6);
+      required = mined.slice(0, UNSTRUCTURED_REQUIRED);
+      preferred = mined.slice(UNSTRUCTURED_REQUIRED);
     }
   } else {
     // Tagged skills that the prose didn't surface are still real requirements.

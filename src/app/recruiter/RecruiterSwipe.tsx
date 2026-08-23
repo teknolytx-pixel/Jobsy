@@ -7,6 +7,7 @@ import { Avatar, MatchOverlay, Sheet, useToast } from "@/components/ui";
 import { REMOTE_LABEL } from "@/components/format";
 import JobComposer from "./JobComposer";
 import { Icon, Logo } from "@/components/Icon";
+import { MIN_MATCH } from "@/lib/matching/engine";
 import SignOutButton from "@/components/SignOutButton";
 
 type CandCard = {
@@ -14,6 +15,7 @@ type CandCard = {
   yearsExp: number; salaryTarget: number | null; availability: string; bio: string;
   skills: string[]; image: string | null; linkedinVerified: boolean;
   score: number; sharedSkills: string[]; missingSkills: string[]; reasons: string[];
+  tier: "STRONG" | "BELOW_BAR";
 };
 
 type JobLite = { id: string; title: string; company: string; location: string; applyMethod: string };
@@ -131,11 +133,16 @@ export default function RecruiterSwipe({
         <div className="sect">
           <div className="fitrow">
             <span>Fit for {job?.title ?? "this role"}</span>
-            <b>{c.score}%</b>
+            <b className={c.tier === "BELOW_BAR" ? "under" : undefined}>{c.score}%</b>
           </div>
           <div className="fitbar">
-            <i style={{ width: `${c.score}%` }} />
+            <i className={c.tier === "BELOW_BAR" ? "under" : undefined} style={{ width: `${c.score}%` }} />
           </div>
+          {c.tier === "BELOW_BAR" ? (
+            <div className="underbar">
+              Below the {MIN_MATCH}% bar — every stronger candidate for this role has been shown
+            </div>
+          ) : null}
           {c.reasons.length ? <div className="why">{c.reasons.join(" · ")}</div> : null}
         </div>
 

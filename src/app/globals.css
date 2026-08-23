@@ -133,6 +133,13 @@ header.top{display:flex;align-items:center;gap:10px;padding:14px 16px 10px;flex:
 .fitrow{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;color:var(--dim)}
 .fitrow b{color:var(--go);font-size:13px}
 .why{margin-top:6px;font-size:12px;color:var(--dim);line-height:1.5}
+/* MATCH-040 — a card under the quality bar.
+   Muted rather than alarming: this is not an error, it is a weaker match being
+   honest about itself. It must not borrow --no, which means "rejected". */
+.fitrow b.under{color:var(--dim)}
+.fitbar i.under{background:linear-gradient(90deg,var(--dim2),var(--dim))}
+.underbar{margin-top:8px;font-size:11.5px;line-height:1.45;color:var(--dim2);
+  background:rgba(255,255,255,.03);border:1px dashed var(--line);border-radius:10px;padding:7px 10px}
 
 .stamp{position:absolute;top:22px;font-size:17px;font-weight:800;letter-spacing:1.5px;padding:6px 12px;
   border-radius:8px;border:2px solid;opacity:0;pointer-events:none;z-index:5}

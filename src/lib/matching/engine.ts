@@ -107,7 +107,71 @@ import { parseRequirements, type Dealbreaker, type Requirements } from "./requir
  * for everyone whose headline already matched their skills. Cross-profession
  * gating is unaffected: a designer still scores 16% on a backend role.
  */
-export const MODEL_VERSION = "2026-08-23.b";
+/**
+ * 2026-08-23.c — a posting that MENTIONS a technology is no longer DEMANDING it.
+ *
+ * On an unstructured posting (roughly 980 of the corpus, because aggregator
+ * feeds truncate the body and lose the "Requirements:" heading), every skill
+ * mined from the prose was promoted to a hard requirement, up to twelve. No
+ * real person clears twelve mandatory skills, so the entire ingested corpus sat
+ * artificially low. The best-evidenced six are now required and the tail is
+ * demoted to preferred rather than dropped.
+ *
+ * Measured on a representative feed posting naming twelve technologies:
+ *
+ *     strong data engineer   64 -> 78
+ *     good data engineer     57 -> 69
+ *     adjacent (PySpark)     56 -> 67
+ *     unrelated candidate    12 -> 12
+ *
+ * The last row is the one that matters: this raises genuinely qualified people
+ * and leaves weak matches exactly where they were. It is a correction to an
+ * unfair denominator, not a general inflation — which would have been the easy
+ * way to make the new MIN_MATCH bar look achievable, and would have made the
+ * number meaningless.
+ */
+export const MODEL_VERSION = "2026-08-23.c";
+
+/**
+ * MATCH-040 — the quality bar. A pair below this is not presented as a match.
+ *
+ * ── What 70 means ──
+ *
+ * It is not a percentage of anything physical; it is this model's own scale,
+ * where the skills block is gated by role family and the logistics features are
+ * gated by qualification. In practice a score clears 70 when someone covers most
+ * of what a posting actually asks for AND the practicalities work. Measured
+ * against real profiles: a data engineer on an aligned data role scored 82, a
+ * platform engineer 76, and a frontend developer holding two of a posting's five
+ * named skills scored 54.
+ *
+ * That last number is the important one. 54 is the honest reading of "missing
+ * three of five", and the temptation when introducing a bar is to inflate the
+ * model until more things clear it. That would make the number mean nothing.
+ * The bar moved to the results, not the other way round.
+ *
+ * ── Why nothing is hidden ──
+ *
+ * Below-bar pairs are still returned, flagged and ranked last, so the deck is
+ * never empty while eligible work exists. See `MatchTier` and the deck. Hiding
+ * them outright was considered and rejected: a candidate in a thin market would
+ * open the app to nothing at all, with no way to tell a quiet day from a broken
+ * product.
+ *
+ * ── This is presentation, not eligibility ──
+ *
+ * Worth stating plainly for the LL144 file. Hard filters (geography, work
+ * authorisation, an onsite role for a remote-only candidate) EXCLUDE — those
+ * pairs never surface. This threshold does not exclude anybody; it orders and
+ * labels. No one is removed from consideration for scoring 69.
+ */
+export const MIN_MATCH = 70;
+
+/** Which side of the bar a result falls on. */
+export type MatchTier = "STRONG" | "BELOW_BAR";
+
+export const tierFor = (score: number): MatchTier =>
+  score >= MIN_MATCH ? "STRONG" : "BELOW_BAR";
 
 export const WEIGHTS = {
   requiredSkills: 40,
