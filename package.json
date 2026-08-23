@@ -46,7 +46,8 @@
     "test:jobimport": "tsx scripts/test-job-import.mts",
     "test:reccrit": "tsx scripts/test-recruiter-criteria.mts",
     "check-boards": "tsx scripts/check-boards.mts",
-    "test:confidence": "tsx scripts/test-confidence.mts"
+    "test:confidence": "tsx scripts/test-confidence.mts",
+    "eval": "tsx scripts/eval-matching.mts"
   },
   "dependencies": {
     "bcryptjs": "3.0.3",

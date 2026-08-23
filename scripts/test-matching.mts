@@ -13,7 +13,8 @@ import type { CandidateInput, JobInput } from "../src/lib/matching/engine";
 // Dynamic imports: tsx loads .ts through the CJS bridge, and a static named
 // import from a .mts ESM entry point doesn't see those exports.
 import { createHash } from "node:crypto";
-const { matchScore, WEIGHTS, MIN_MATCH } = await import("../src/lib/matching/engine");
+const { matchScore, WEIGHTS, MIN_MATCH, RELEVANCE_FLOOR } =
+  await import("../src/lib/matching/engine");
 const { parseRequirements, extractMinYears, UNSTRUCTURED_REQUIRED } =
   await import("../src/lib/matching/requirements");
 const { roleFamily, skillCredit, familyCompatibility, EDGES, CROSS, DEFAULT_CROSS, FAMILY_SKILLS } =
@@ -362,12 +363,12 @@ check("TC-REQ-48 missing a nice-to-have costs less than missing a must-have",
  */
 const modelFingerprint = createHash("sha256")
   .update(JSON.stringify({ WEIGHTS, EDGES, SKILL_ALIASES, CROSS, DEFAULT_CROSS, FAMILY_SKILLS,
-                          UNSTRUCTURED_REQUIRED, MIN_MATCH }))
+                          UNSTRUCTURED_REQUIRED, MIN_MATCH, RELEVANCE_FLOOR }))
   .digest("hex")
   .slice(0, 12);
 
 /** Update BOTH values together, in the same commit as the model change. */
-const RECORDED_MODEL = { fingerprint: "768bb87292c9", version: "2026-08-23.c" };
+const RECORDED_MODEL = { fingerprint: "ef7fac279567", version: "2026-08-23.d" };
 
 check("TC-REQ-49 the scoring model matches its recorded version",
   modelFingerprint === RECORDED_MODEL.fingerprint &&

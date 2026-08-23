@@ -131,7 +131,27 @@ import { confidenceFor, type ConfidenceResult } from "./confidence";
  * way to make the new MIN_MATCH bar look achievable, and would have made the
  * number meaningless.
  */
-export const MODEL_VERSION = "2026-08-23.c";
+/**
+ * 2026-08-23.d — a relevance floor. Some pairs are not weak matches, they are
+ * different jobs.
+ *
+ * A labelled evaluation of twenty realistic pairs scored 15/20, and four of the
+ * five failures were one thing: a Product Designer against a backend role, a
+ * recruiter against an ML role, an accountant against a nursing role. The engine
+ * RANKED every one of them correctly — all landed below every legitimate weak
+ * match — but nothing removed them, so they filled the tail of any deck that ran
+ * out of real candidates.
+ *
+ * That is what "the matching isn't accurate" meant. Not bad ordering. No floor.
+ *
+ * A pair is now excluded when the posting names at least two requirements and
+ * qualification falls under RELEVANCE_FLOOR. Measured, not guessed: the
+ * wrong-profession pairs scored 0.00–0.05 and the weakest pair still worth
+ * showing scored 0.13.
+ *
+ * Evaluation after: 20/20.
+ */
+export const MODEL_VERSION = "2026-08-23.d";
 
 /**
  * MATCH-040 — the quality bar. A pair below this is not presented as a match.
@@ -167,6 +187,49 @@ export const MODEL_VERSION = "2026-08-23.c";
  * labels. No one is removed from consideration for scoring 69.
  */
 export const MIN_MATCH = 70;
+
+/**
+ * MATCH-041 — below this, a pair is not a weak match. It is a different job.
+ *
+ * ── Why a floor was needed at all ──
+ *
+ * A labelled evaluation of twenty realistic pairs (scripts/eval-matching.mts)
+ * scored 15/20, and four of the five failures were the same thing: a Product
+ * Designer against a backend role, a recruiter against an ML role, an
+ * accountant against a nursing role. The engine RANKED all of them correctly —
+ * every one landed below every legitimate weak match — but nothing ever removed
+ * them, so they filled the tail of a deck that had run out of real candidates.
+ *
+ * That is what "the matching isn't accurate" turned out to mean. Not bad
+ * ordering. No floor.
+ *
+ * ── Why `qualification` and not the score ──
+ *
+ * Qualification is skills coverage times role-family fit: literally "can this
+ * person do this job at all". The final score also carries compensation,
+ * experience and commute, and a candidate in the right city with a plausible
+ * salary target accumulates those regardless of whether they can do the work.
+ * Excluding on the score would therefore hide people for being far away, which
+ * is a different and much worse rule.
+ *
+ * ── Why 0.10, and how firmly ──
+ *
+ * Measured, not chosen. Across the evaluation set the wrong-profession pairs
+ * scored 0.00, 0.00, 0.00 and 0.05; the weakest pair a recruiter would still
+ * want to see — a QA engineer on a frontend role, sharing Testing genuinely —
+ * scored 0.13. 0.10 sits in that gap.
+ *
+ * That gap is narrow and rests on twenty cases, so this is the number most
+ * likely to be wrong in this file. It is deliberately conservative: erring
+ * toward showing somebody costs a swipe, and erring the other way makes a
+ * person invisible with no way to find out.
+ *
+ * The `required.length >= 2` guard matters as much as the threshold. A posting
+ * that names nothing in particular has told us nothing to be irrelevant TO, and
+ * hiding candidates from a vague job description would punish them for the
+ * recruiter's writing.
+ */
+export const RELEVANCE_FLOOR = 0.1;
 
 /** Which side of the bar a result falls on. */
 export type MatchTier = "STRONG" | "BELOW_BAR";
@@ -562,7 +625,20 @@ export function matchScore(job: JobInput, cand: CandidateInput): MatchResult {
   const raw = requiredPts + preferredPts + expPts + compPts + workPts;
   const rawScore = clamp(Math.round(raw), 1, 99);
 
-  const exclusion = hardFilter(job, cand, reqs);
+  /**
+   * Relevance exclusion, decided after qualification is known.
+   *
+   * Separate from `hardFilter` on purpose: that one refuses on what the POSTING
+   * states — onsite, out of metro — and can be evaluated without scoring
+   * anything. This one is about the pair, and needs the skills work finished
+   * first.
+   */
+  const irrelevant =
+    reqs.required.length >= 2 && qualification < RELEVANCE_FLOOR
+      ? `Not a fit for this role — none of the ${reqs.required.length} skills it asks for`
+      : null;
+
+  const exclusion = hardFilter(job, cand, reqs) ?? irrelevant;
   // Floor here, not at the call site. A hard filter that only sets a flag is a
   // filter that will eventually be ignored by some caller and leak through.
   const score = exclusion ? Math.min(rawScore, 5) : rawScore;
