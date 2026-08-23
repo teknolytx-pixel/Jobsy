@@ -82,6 +82,7 @@ jobs:
         run: |
           npm run test:skillmatch
           npm run test:deck
+          npm run test:reccrit
 
       - name: Build
         run: npm run build

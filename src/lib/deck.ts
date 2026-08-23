@@ -393,6 +393,73 @@ export async function recruiterDeck(
 
   const jobCountry = (job.countryCode ?? "").trim().toUpperCase() || null;
 
+  /**
+   * ── ELIGIBILITY, APPLIED WHEN THE POOL IS CHOSEN ──
+   *
+   * Skill coverage decided the whole pool, and geography, sponsorship and work
+   * model were applied afterwards to whatever came back. Those three are not
+   * preferences that make somebody a weaker candidate; they decide whether the
+   * person can take the job at all. Checking them second meant a market full of
+   * skilled-but-ineligible people filled all 400 slots, got discarded a moment
+   * later, and the one person who could actually be hired was never fetched.
+   *
+   * Measured on a 450-row fixture before this change: a role that does not
+   * sponsor, with exactly one work-authorized candidate available, returned
+   * ZERO candidates. Not a thin list — an empty one, from which a recruiter
+   * would reasonably conclude there was nobody to hire.
+   *
+   * The narrowing below mirrors the authorities EXACTLY and never more
+   * aggressively, because a pool filter that over-excludes is invisible: the
+   * candidate simply never appears and nothing reports why. Anything subtler
+   * than these two cases is left to `checkGeoEligibility` and the engine's hard
+   * filter on the rows that come back.
+   */
+  const eligibility = [];
+
+  /**
+   * `checkSponsorship` refuses exactly one combination: the candidate states
+   * they need sponsorship AND the role states it is unavailable. Every other
+   * combination — including either side being unstated — is eligible, so only
+   * an explicit `true` is excluded here and NULL is deliberately kept.
+   */
+  if (job.sponsorshipAvailable === false) {
+    eligibility.push(sql`(${users.requiresSponsorship} IS NULL OR ${users.requiresSponsorship} = false)`);
+  }
+
+  /**
+   * The engine's hard filter already excludes a remote-only candidate from a
+   * strictly onsite role — "this role is onsite and you're remote-only" — so
+   * fetching them only to drop them wastes a slot a reachable candidate needed.
+   *
+   * Only the REMOTE case. The filter also excludes onsite roles outside the
+   * candidate's metro, but relocation and imprecise city data make that a
+   * judgement the engine should keep making on the full row rather than one a
+   * query should make on a string comparison.
+   */
+  if (job.remote === "ONSITE") {
+    eligibility.push(sql`${users.remotePref} <> 'REMOTE'`);
+  }
+
+  /**
+   * How reachable this person is for THIS role, as a ranking signal.
+   *
+   * The candidate deck has always had this; the recruiter deck had nothing, so
+   * an Austin hybrid role ranked 450 Chicago candidates above an equally
+   * skilled one in Austin. Commute feasibility only — same city, then same
+   * state — never a neighbourhood signal, and flat for a remote role where
+   * location genuinely does not matter.
+   */
+  const jobCity = (job.city ?? "").trim().toLowerCase();
+  const jobState = (job.stateProvince ?? "").trim().toUpperCase();
+  const proximity =
+    job.remote === "REMOTE"
+      ? sql<number>`0`
+      : sql<number>`(case
+            when ${jobCity} <> '' and lower(coalesce(${users.currentCity}, '')) = ${jobCity} then 2
+            when ${jobState} <> '' and upper(coalesce(${users.currentStateProvince}, '')) = ${jobState} then 1
+            else 0
+          end)`;
+
   const rows = await db
     .select()
     .from(users)
@@ -421,7 +488,8 @@ export async function recruiterDeck(
           ? [
               sql`(${users.currentCountry} = ${jobCountry} OR ${users.internationalSearchEnabled} = true)`,
             ]
-          : [])
+          : []),
+        ...eligibility
       )
     )
     /**
@@ -434,8 +502,14 @@ export async function recruiterDeck(
      * their profile in a month was never in the running. On a growing user base
      * that gets steadily worse.
      */
+    /**
+     * Coverage, then reachability, then recency — the same shape the candidate
+     * deck uses, from the other side.
+     */
     .orderBy(
-      ...(expandedRole.length ? [desc(skillCoverage), desc(users.updatedAt)] : [desc(users.updatedAt)])
+      ...(expandedRole.length
+        ? [desc(skillCoverage), desc(proximity), desc(users.updatedAt)]
+        : [desc(proximity), desc(users.updatedAt)])
     )
     .limit(POOL);
 
