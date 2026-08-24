@@ -95,7 +95,7 @@ const QUEUES = [
 const human = (s: string) => s.replace(/_/g, " ").toLowerCase();
 
 export default function AdminConsole({ email }: { email: string }) {
-  const [tab, setTab] = useState<"queue" | "compliance" | "health">("queue");
+  const [tab, setTab] = useState<"queue" | "compliance" | "health" | "candidates">("queue");
   const [queue, setQueue] = useState<(typeof QUEUES)[number]["key"]>("OPEN");
   const [reports, setReports] = useState<Report[] | null>(null);
   const [compliance, setCompliance] = useState<Compliance | null>(null);
@@ -225,6 +225,9 @@ export default function AdminConsole({ email }: { email: string }) {
           {compliance?.privacyRequests.overdueCount ? (
             <span className="n">{compliance.privacyRequests.overdueCount}</span>
           ) : null}
+        </button>
+        <button className={tab === "candidates" ? "on" : ""} onClick={() => setTab("candidates")}>
+          Candidates
         </button>
         <button className={tab === "health" ? "on" : ""} onClick={() => setTab("health")}>
           Health
@@ -447,6 +450,8 @@ export default function AdminConsole({ email }: { email: string }) {
           )
         ) : null}
 
+        {tab === "candidates" ? <CandidatesPanel /> : null}
+
         {tab === "health" ? (
           health ? (
             <>
@@ -595,5 +600,163 @@ export default function AdminConsole({ email }: { email: string }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * WHO WE HOLD, AND WHETHER WE HAVE TOLD THEM.
+ *
+ * The second half of that sentence is the reason this screen exists. An import
+ * count on its own reads as an achievement; an import count next to the number
+ * of people who have not been notified reads as what it is — an obligation with
+ * a deadline attached. GDPR Article 14 gives a month, and NYC LL144 forbids
+ * running an automated hiring tool over someone who has not been told.
+ *
+ * So "not yet notified" is rendered first, largest, and in the alert colour when
+ * it is non-zero. A dashboard that made this comfortable to ignore would be
+ * doing the opposite of its job.
+ */
+function CandidatesPanel() {
+  type Src = {
+    id: string; kind: string; kindLabel: string; label: string; token: string;
+    hasCredential: boolean; lawfulBasis: string; enabled: boolean; status: string;
+    held: number; lastCount: number; totalImported: number;
+    lastRunAt: string | null; lastError: string | null; resumable: boolean;
+  };
+  type Data = {
+    stats: { total: number; imported: number; notified: number; claimed: number;
+             suppressed: number; withEmail: number; withPreferredChannel: number };
+    owed: number;
+    sources: Src[];
+    available: { kind: string; label: string; live: boolean; needs: string | null }[];
+  };
+
+  const [data, setData] = useState<Data | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const load = async () => {
+    const r = await fetch("/api/admin/candidates", { cache: "no-store" });
+    if (r.ok) setData(await r.json());
+  };
+  useEffect(() => { void load(); }, []);
+
+  const sync = async (sourceId: string) => {
+    setBusy(sourceId);
+    setMsg(null);
+    try {
+      const r = await fetch("/api/admin/candidates", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceId }),
+      });
+      const d = await r.json();
+      setMsg(
+        d.result?.error
+          ? `Sync failed: ${d.result.error}`
+          : `${d.result.created} new, ${d.result.updated} refreshed` +
+            (d.result.suppressed ? `, ${d.result.suppressed} skipped (previously objected)` : "") +
+            (d.result.note ? ` — ${d.result.note}` : "")
+      );
+      await load();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (!data) return <div className="emptylist">Loading…</div>;
+
+  const s = data.stats;
+  return (
+    <>
+      <p style={{ color: "var(--dim)", fontSize: 13.5, margin: "0 0 14px", lineHeight: 1.6 }}>
+        People imported from connected systems. They are <b>not</b> users and are not matched
+        against anything until they have been told they are here and have claimed their profile.
+      </p>
+
+      <div className="conf" style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 28, fontWeight: 800, color: data.owed ? "var(--bad)" : "var(--dim2)" }}>
+          {data.owed}
+        </div>
+        <div style={{ fontSize: 12.5, color: "var(--dim)" }}>
+          {data.owed
+            ? "held but not yet notified — each is owed a notice within a month of import"
+            : "everyone held has been notified"}
+        </div>
+      </div>
+
+      <div className="statgrid">
+        {[
+          ["Held in total", s.total],
+          ["Notified", s.notified],
+          ["Claimed their profile", s.claimed],
+          ["Objected / erased", s.suppressed],
+          ["Reachable by email", s.withEmail],
+          ["Published a profile link", s.withPreferredChannel],
+        ].map(([label, n]) => (
+          <div key={String(label)} className="stat">
+            <b>{n as number}</b>
+            <span>{label as string}</span>
+          </div>
+        ))}
+      </div>
+
+      {msg ? <div className="notice" style={{ margin: "12px 0" }}>{msg}</div> : null}
+
+      <h4 style={{ margin: "22px 0 8px", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".9px", color: "var(--dim2)", fontWeight: 800 }}>
+        {data.sources.length} connected
+      </h4>
+
+      {data.sources.length === 0 ? (
+        <div className="emptylist">
+          Nothing connected yet. A source is one employer&rsquo;s ATS account and its own API key.
+        </div>
+      ) : (
+        data.sources.map((src) => (
+          <div key={src.id} className="srcrow">
+            <div>
+              <b>{src.label}</b>
+              <div style={{ fontSize: 12.5, color: "var(--dim)" }}>
+                {src.kindLabel}
+                {src.token ? ` · ${src.token}` : ""} · basis: {src.lawfulBasis.toLowerCase().replace(/_/g, " ")}
+              </div>
+              <div style={{ fontSize: 12.5, color: "var(--dim2)" }}>
+                {src.held} held · {src.totalImported} imported all-time
+                {src.lastRunAt ? ` · synced ${new Date(src.lastRunAt).toLocaleString()}` : " · never synced"}
+                {src.resumable ? " · resuming next run" : ""}
+              </div>
+              {src.lastError ? (
+                <div style={{ fontSize: 12.5, color: "var(--bad)" }}>{src.lastError}</div>
+              ) : null}
+            </div>
+            <button className="ghost" disabled={busy === src.id} onClick={() => void sync(src.id)}>
+              {busy === src.id ? "Syncing…" : "Sync now"}
+            </button>
+          </div>
+        ))
+      )}
+
+      <h4 style={{ margin: "22px 0 8px", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".9px", color: "var(--dim2)", fontWeight: 800 }}>
+        What can be connected
+      </h4>
+      {data.available.map((a) => (
+        <div key={a.kind} className="emptylist" style={{ marginBottom: 8, textAlign: "left" }}>
+          <b>{a.label}</b>
+          {a.live ? (
+            <div style={{ fontSize: 12.5, color: "var(--dim)" }}>
+              Ready — needs an API key generated in that employer&rsquo;s own account.
+            </div>
+          ) : (
+            /*
+             * Said plainly rather than hidden behind a disabled button. These
+             * are real products with real contracts; the honest answer to "why
+             * can't I connect Monster" is the sentence their account manager
+             * needs to hear, not a greyed-out control.
+             */
+            <div style={{ fontSize: 12.5, color: "var(--dim)" }}>Needs {a.needs}</div>
+          )}
+        </div>
+      ))}
+    </>
   );
 }

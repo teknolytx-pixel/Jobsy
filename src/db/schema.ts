@@ -91,6 +91,68 @@ export const sourceKindEnum = pgEnum("source_kind", [
 ]);
 
 export const sourceStatusEnum = pgEnum("source_status", ["PENDING", "OK", "FAILING", "DISABLED"]);
+
+/**
+ * Where a sourced candidate came from.
+ *
+ * Every value here is a system the EMPLOYER has a relationship with — their own
+ * ATS, or a resume database they hold a licence for. There is deliberately no
+ * value for a public profile site, because taking someone's CV off one is a
+ * terms-of-service breach and, without a lawful basis, an unlawful act. The
+ * absence is the policy.
+ */
+export const candidateSourceKindEnum = pgEnum("candidate_source_kind", [
+  // The employer's own applicants. The strongest position we can be in: these
+  // people applied to this company and agreed to its privacy notice.
+  "GREENHOUSE",
+  "LEVER",
+  "ASHBY",
+  "WORKABLE",
+  // Licensed resume databases. Inert until a real contract key is supplied.
+  "DICE",
+  "MONSTER",
+  "ZIPRECRUITER",
+  "INDEED_RESUME",
+  "NAUKRI",
+  // A recruiter typing someone in, or uploading a CV they were sent.
+  "MANUAL",
+]);
+
+/**
+ * Why we are allowed to hold this person's data.
+ *
+ * Recorded per candidate rather than assumed per source, because the same ATS
+ * can hold applicants (who consented to that employer) and referrals (who did
+ * not). A row that cannot name its basis is a row we should not have.
+ */
+export const lawfulBasisEnum = pgEnum("lawful_basis", [
+  /** They applied to this employer and accepted its privacy notice. */
+  "APPLICATION",
+  /** Held under a resume-database licence the employer pays for. */
+  "LICENSED",
+  /** Recruitment sourcing as a legitimate interest — requires notice under Art 14. */
+  "LEGITIMATE_INTEREST",
+  /** They told us directly. */
+  "CONSENT",
+]);
+
+/**
+ * How far along a sourced candidate is.
+ *
+ * The order matters and the first value is the important one: IMPORTED means
+ * held but invisible — not matched, not scored, not shown to anyone but the
+ * recruiter whose ATS they came from. A person cannot be put through an
+ * automated hiring tool before they have been told it exists (NYC LL144), and
+ * cannot be silently added to a database (GDPR Art 14). This column is what
+ * makes those two facts enforceable rather than aspirational.
+ */
+export const candidateStateEnum = pgEnum("candidate_state", [
+  "IMPORTED",
+  "NOTIFIED",
+  "CLAIMED",
+  /** They objected, or asked to be erased. Never re-import. */
+  "SUPPRESSED",
+]);
 export const remotePrefEnum = pgEnum("remote_pref", ["ONSITE", "HYBRID", "REMOTE", "ANY"]);
 export const applicationStatusEnum = pgEnum("application_status", [
   "SUBMITTED",
@@ -709,6 +771,127 @@ export const ingestRuns = pgTable(
 // ─────────────────────────────────────────────────────────────
 // RELATIONS
 // ─────────────────────────────────────────────────────────────
+/**
+ * A connected candidate source — one employer's ATS account, or one resume
+ * database licence.
+ *
+ * Separate from `job_sources` on purpose. A job board is a public thing anyone
+ * may read; a candidate source holds other people's personal data under a
+ * credential that belongs to one company, and conflating the two would make it
+ * far too easy to leak the second through a screen built for the first.
+ */
+export const candidateSources = pgTable(
+  "candidate_sources",
+  {
+    id: varchar("id", { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+    kind: candidateSourceKindEnum("kind").notNull(),
+    /** The company whose credential this is. Scopes every candidate it imports. */
+    companyId: varchar("company_id", { length: 36 })
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    /** Board slug, account id, or licence identifier. Never the secret itself. */
+    token: varchar("token", { length: 191 }).notNull(),
+    label: varchar("label", { length: 120 }).notNull(),
+    /**
+     * The API credential.
+     *
+     * Held because the sync runs without a human present. Stored separately
+     * from `token` so it never rides along in a list response by accident — the
+     * API layer must select columns explicitly to include it, and no read path
+     * outside the sync does.
+     */
+    secret: text("secret"),
+    lawfulBasis: lawfulBasisEnum("lawful_basis").notNull().default("APPLICATION"),
+    enabled: boolean("enabled").notNull().default(true),
+    status: sourceStatusEnum("status").notNull().default("PENDING"),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    lastCount: integer("last_count").notNull().default(0),
+    totalImported: integer("total_imported").notNull().default(0),
+    syncCursor: integer("sync_cursor").notNull().default(0),
+    addedById: varchar("added_by_id", { length: 36 }).references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("candidate_sources_company_kind_token_idx").on(t.companyId, t.kind, t.token),
+    index("candidate_sources_company_idx").on(t.companyId),
+  ]
+);
+
+/**
+ * A person we hold, who has not necessarily agreed to be held.
+ *
+ * ── Why this is not a row in `users` ──
+ *
+ * Because they are not users. They have no password, no session, no acceptance
+ * of any terms, and in most cases no idea Jobsy exists. Putting them in `users`
+ * would put them one careless query away from the matching deck, the recruiter
+ * search, and every count that says "candidates on Jobsy" — and the separation
+ * is what makes "invisible until notified" true by construction rather than by
+ * everyone remembering a WHERE clause.
+ *
+ * When somebody claims their profile a real `users` row is created and linked
+ * through `claimedUserId`. That is the moment they become a user.
+ */
+export const sourcedCandidates = pgTable(
+  "sourced_candidates",
+  {
+    id: varchar("id", { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+    sourceId: varchar("source_id", { length: 36 })
+      .notNull()
+      .references(() => candidateSources.id, { onDelete: "cascade" }),
+    companyId: varchar("company_id", { length: 36 })
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    /** Their id in the originating system, so re-imports update rather than duplicate. */
+    externalId: varchar("external_id", { length: 191 }).notNull(),
+
+    state: candidateStateEnum("state").notNull().default("IMPORTED"),
+    lawfulBasis: lawfulBasisEnum("lawful_basis").notNull(),
+
+    firstName: varchar("first_name", { length: 120 }),
+    lastName: varchar("last_name", { length: 120 }),
+    email: varchar("email", { length: 255 }),
+    phone: varchar("phone", { length: 60 }),
+    headline: varchar("headline", { length: 200 }),
+    location: varchar("location", { length: 160 }),
+    skills: text("skills").array().notNull().default([]),
+    /** Extracted CV text, for skill reading. The file stays in the source system. */
+    resumeText: text("resume_text"),
+    /** Where the CV lives in the ATS, for a recruiter who wants the original. */
+    resumeUrl: text("resume_url"),
+
+    /**
+     * How this person said they prefer to be approached, if they said so.
+     *
+     * Only ever populated from something they published themselves — the
+     * profile URL they put on their own application. It is a pointer to a
+     * conversation on their turf, not a channel we opened.
+     */
+    preferredChannel: varchar("preferred_channel", { length: 40 }),
+    preferredHandle: text("preferred_handle"),
+
+    /** Article 14: when we told them, and how. Null means we have not. */
+    noticeSentAt: timestamp("notice_sent_at", { withTimezone: true }),
+    noticeChannel: varchar("notice_channel", { length: 40 }),
+    /** Single-use token for the claim link. */
+    claimToken: varchar("claim_token", { length: 80 }),
+    claimedUserId: varchar("claimed_user_id", { length: 36 }).references(() => users.id),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    /** An objection or erasure request. Suppresses, and blocks re-import. */
+    suppressedAt: timestamp("suppressed_at", { withTimezone: true }),
+    suppressedReason: varchar("suppressed_reason", { length: 120 }),
+
+    importedAt: timestamp("imported_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("sourced_candidates_source_external_idx").on(t.sourceId, t.externalId),
+    index("sourced_candidates_company_state_idx").on(t.companyId, t.state),
+    index("sourced_candidates_email_idx").on(t.email),
+  ]
+);
+
 export const companiesRelations = relations(companies, ({ many }) => ({
   jobs: many(jobs),
   users: many(users),
@@ -762,6 +945,11 @@ export type ApplyMethod = (typeof applyMethodEnum.enumValues)[number];
 export type JobSource = (typeof jobSourceEnum.enumValues)[number];
 export type EmailTemplate = (typeof emailTemplateEnum.enumValues)[number];
 export type JobSourceRow = typeof jobSources.$inferSelect;
+export type CandidateSourceRow = typeof candidateSources.$inferSelect;
+export type SourcedCandidateRow = typeof sourcedCandidates.$inferSelect;
+export type CandidateSourceKind = (typeof candidateSourceKindEnum.enumValues)[number];
+export type CandidateState = (typeof candidateStateEnum.enumValues)[number];
+export type LawfulBasis = (typeof lawfulBasisEnum.enumValues)[number];
 export type NewJobSource = typeof jobSources.$inferInsert;
 export type SourceKind = (typeof sourceKindEnum.enumValues)[number];
 export type SourceStatus = (typeof sourceStatusEnum.enumValues)[number];
