@@ -67,7 +67,16 @@ export default function SourcesManager({ initial }: { initial: Source[] }) {
     try {
       const res = await fetch(`/api/sources/${id}`, { method: "POST" });
       const d = await res.json();
-      toast(d.error ? `Sync failed: ${d.error}` : `${d.company}: ${d.created} new, ${d.updated} refreshed`);
+      /*
+       * A crawl of a large employer stops on its time budget with pages left
+       * over. That is a partial success, and saying nothing about it made it
+       * indistinguishable from "this site only has fifteen jobs".
+       */
+      toast(
+        d.error
+          ? `Sync failed: ${d.error}`
+          : `${d.company}: ${d.created} new, ${d.updated} refreshed` + (d.note ? ` — ${d.note}` : "")
+      );
       await refresh();
     } finally {
       setSyncing(null);

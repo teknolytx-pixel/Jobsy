@@ -36,6 +36,8 @@ const check = (label: string, ok: boolean, detail = "") => {
 };
 
 const {
+  discoverJobUrls,
+  paginationLinksFrom,
   parseRobots,
   robotsAllows,
   jobLinksFrom,
@@ -405,6 +407,136 @@ check("TC-CRAWL-127 and warns that the wrong database is a real possibility",
   /DATABASE_URL/.test(schemaFinding?.action ?? ""), schemaFinding?.action?.slice(-70));
 check("TC-CRAWL-128 a healthy database raises nothing",
   !assess({ ...HEALTH_BASE, schemaDrift: [] }).some((f) => f.area === "SCHEMA"));
+
+
+// ─────────────────────────────────────────────────────────────
+// COVERAGE — the reason a bank with 3,506 openings imported fifteen
+// ─────────────────────────────────────────────────────────────
+console.log("\nCOVERAGE\n");
+
+const PAGED = `<!doctype html><html><body>
+  <a href="/job/1/senior-alpha-engineer">a</a>
+  <a href="/search-jobs?p=2" rel="next">Next</a>
+  <a href="/search-jobs?p=3">3</a>
+  <a href="/search-jobs?p=2">2 again</a>
+  <a href="/job/2/staff-beta-engineer?p=9">a job with a page param</a>
+  <a href="https://elsewhere.com/search?p=2">offsite</a>
+</body></html>`;
+
+const paged = paginationLinksFrom(PAGED, new URL("https://big.com/search-jobs"));
+check("TC-CRAWL-140 pagination links are found", paged.length === 2, paged.join(" | "));
+check("TC-CRAWL-141 in page order", /p=2$/.test(paged[0] ?? "") && /p=3$/.test(paged[1] ?? ""), paged.join(" | "));
+check("TC-CRAWL-142 a job page carrying a page param is not pagination",
+  !paged.some((u) => /\/job\//.test(u)), paged.join(" | "));
+check("TC-CRAWL-143 and offsite pagination is ignored",
+  paged.every((u) => new URL(u).origin === "https://big.com"), paged.join(" | "));
+
+/**
+ * The load-bearing regression.
+ *
+ * This site is the exact shape that produced fifteen: the listing page renders
+ * a couple of job cards, and everything else is behind pagination and the
+ * sitemap. The old code returned the listing's links and never looked further,
+ * because the sitemap was a FALLBACK rather than an additional source.
+ */
+const BIG: Record<string, string> = {
+  "https://big.com/robots.txt": "User-agent: *\nAllow: /\nSitemap: https://big.com/sitemap.xml\n",
+  "https://big.com/search-jobs": `<html><body>
+      <a href="/job/1/senior-alpha-engineer">1</a>
+      <a href="/job/2/staff-beta-engineer">2</a>
+      <a href="/search-jobs?p=2" rel="next">Next</a></body></html>`,
+  "https://big.com/search-jobs?p=2": `<html><body>
+      <a href="/job/3/principal-gamma-engineer">3</a>
+      <a href="/job/4/lead-delta-engineer">4</a></body></html>`,
+  "https://big.com/sitemap.xml": `<urlset>
+      <url><loc>https://big.com/job/5/direct-from-sitemap-engineer</loc></url>
+      <url><loc>https://big.com/jobs/category/technology</loc></url>
+      <url><loc>https://big.com/jobs/location/dallas</loc></url>
+    </urlset>`,
+  "https://big.com/jobs/category/technology": `<html><body>
+      <a href="/job/6/category-page-engineer">6</a></body></html>`,
+  "https://big.com/jobs/location/dallas": `<html><body>
+      <a href="/job/7/location-page-engineer">7</a></body></html>`,
+};
+
+const prevFetch = globalThis.fetch;
+globalThis.fetch = (async (input: RequestInfo | URL) => {
+  const url = (typeof input === "string" ? input : input.toString()).replace(/\/$/, "");
+  const body = BIG[url] ?? BIG[url + "/"];
+  if (body === undefined) return new Response("", { status: 404 });
+  return new Response(body, { status: 200, headers: { "Content-Type": "text/html" } });
+}) as typeof fetch;
+
+const bigRules = parseRobots(BIG["https://big.com/robots.txt"]);
+const wide = await discoverJobUrls("https://big.com/search-jobs", BIG["https://big.com/search-jobs"], bigRules, {});
+const ids = wide.urls.map((u) => u.match(/\/job\/(\d+)\//)?.[1]).sort().join(",");
+
+check("TC-CRAWL-150 every route to a job is used, not just the first",
+  wide.urls.length === 7, `${wide.urls.length}: ${ids}`);
+check("TC-CRAWL-151 including the listing's later pages", /3/.test(ids) && /4/.test(ids), ids);
+check("TC-CRAWL-152 and jobs named directly in the sitemap", /5/.test(ids), ids);
+check("TC-CRAWL-153 and jobs behind sitemap category and location pages",
+  /6/.test(ids) && /7/.test(ids), ids);
+check("TC-CRAWL-154 and it says where they came from", wide.via.length === 4, wide.via.join(" | "));
+
+/** The cap still holds, and says it was hit. */
+const capped = await discoverJobUrls("https://big.com/search-jobs", BIG["https://big.com/search-jobs"], bigRules, { limit: 3 });
+check("TC-CRAWL-155 the limit is respected", capped.urls.length === 3, `${capped.urls.length}`);
+check("TC-CRAWL-156 and reported as truncated", capped.truncated);
+
+/** A budget already spent stops the crawl instead of being ignored. */
+const noTime = await discoverJobUrls("https://big.com/search-jobs", BIG["https://big.com/search-jobs"], bigRules, { deadline: Date.now() - 1 });
+check("TC-CRAWL-157 an expired budget stops expansion — the page's own links still count",
+  noTime.urls.length === 2, `${noTime.urls.length}`);
+check("TC-CRAWL-158 and says it was cut short", noTime.truncated);
+
+/**
+ * Rotation. Two runs with different offsets must not open the same category
+ * pages, or coverage stops dead at whatever the first run reached.
+ */
+const rotA = await discoverJobUrls("https://big.com/search-jobs", BIG["https://big.com/search-jobs"], bigRules, { limit: 6, listingLimit: 1, rotate: 0 });
+const rotB = await discoverJobUrls("https://big.com/search-jobs", BIG["https://big.com/search-jobs"], bigRules, { limit: 6, listingLimit: 1, rotate: 1 });
+check("TC-CRAWL-159 rotation changes which listing pages get expanded",
+  rotA.urls.join() !== rotB.urls.join(),
+  `${rotA.urls.length} vs ${rotB.urls.length}`);
+
+const { crawlJsonLdReport: report } = await import("../src/lib/providers/universal");
+const { crawlRotation } = await import("../src/lib/sources");
+check("TC-CRAWL-160 the rotation offset advances once per sync window",
+  crawlRotation(0) !== crawlRotation(6 * 3_600_000),
+  `${crawlRotation(0)} vs ${crawlRotation(6 * 3_600_000)}`);
+check("TC-CRAWL-161 and is stable within one window",
+  crawlRotation(1_000) === crawlRotation(2_000));
+
+/** Unseen job pages are opened before ones already imported. */
+const ORDERED: Record<string, string> = {
+  "https://ord.com/robots.txt": "User-agent: *\nAllow: /\n",
+  "https://ord.com/careers": `<html><body>
+      <a href="/job/100/old-known-engineer">old</a>
+      <a href="/job/200/new-unknown-engineer">new</a></body></html>`,
+  "https://ord.com/job/100/old-known-engineer": `<html><head>${JOB_LD("Old Known Engineer", "100")}</head></html>`,
+  "https://ord.com/job/200/new-unknown-engineer": `<html><head>${JOB_LD("New Unknown Engineer", "200")}</head></html>`,
+};
+globalThis.fetch = (async (input: RequestInfo | URL) => {
+  const url = (typeof input === "string" ? input : input.toString()).replace(/\/$/, "");
+  const body = ORDERED[url] ?? ORDERED[url + "/"];
+  if (body === undefined) return new Response("", { status: 404 });
+  return new Response(body, { status: 200, headers: { "Content-Type": "text/html" } });
+}) as typeof fetch;
+
+const oneOnly = await report("https://ord.com/careers", "Ord", {
+  known: new Set(["https://ord.com/job/100/old-known-engineer"]),
+  limit: 2,
+  budgetMs: 30_000,
+});
+check("TC-CRAWL-170 a page we have never seen is opened first",
+  oneOnly.jobs[0]?.title === "New Unknown Engineer",
+  oneOnly.jobs.map((j) => j.title).join(" | "));
+check("TC-CRAWL-171 and the report counts what it found and what it read",
+  oneOnly.discovered === 2 && oneOnly.opened === 2,
+  `${oneOnly.discovered} found, ${oneOnly.opened} read`);
+
+globalThis.fetch = prevFetch;
 
 globalThis.fetch = realFetch;
 console.log(`\n${pass} passed, ${fail} failed  —  crawl\n`);

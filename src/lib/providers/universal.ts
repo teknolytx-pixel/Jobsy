@@ -1,6 +1,12 @@
 import { extractSkills, inferSeniority } from "../skills";
 import { findJsonLdJobPostings } from "../discovery";
-import { CRAWL_LIMIT, fetchJobPages, fetchRobots, findJobPages } from "../crawl";
+import {
+  CRAWL_BUDGET_MS,
+  CRAWL_LIMIT,
+  discoverJobUrls,
+  fetchJobPages,
+  fetchRobots,
+} from "../crawl";
 import { safeFetch } from "../safeFetch";
 import {
   type NormalizedJob,
@@ -123,37 +129,111 @@ export async function fetchJsonLdJobs(pageUrl: string, companyFallback?: string)
  * CRAWL a careers site whose structured data lives on the job pages.
  *
  * The common case, not an edge case. Google for Jobs wants JSON-LD on the page
- * for one opening; almost nothing requires it on the index. So a site can be
- * entirely readable and still look opaque if you only ever open the index —
- * which is exactly what `fetchJsonLdJobs` does.
+ * for one opening; almost nothing requires it on the index.
  *
- * Job pages are found by following links, or through the sitemap when the
- * listing is rendered client-side. robots.txt is read first and honoured, and
- * pages are fetched one at a time with the site's own Crawl-delay.
+ * ── Coverage, and why it takes more than one run ──
  *
- * Deduplicated by external id, because a job frequently appears under more than
- * one URL — /job/1234/title and /en-us/job/1234/title being the usual pair.
+ * A bank with 3,506 openings imported fifteen on its first sync, for three
+ * reasons that all had to be fixed: the sitemap was only a fallback so it was
+ * never opened, the listing's later pages were never read, and the page cap was
+ * forty. Discovery is now additive and paginated, and the cap is the clock.
+ *
+ * What one run cannot do is fetch three thousand pages politely. So a run takes
+ * as much as its budget allows, prefers job pages we do not already hold, and
+ * rotates which category pages it expands — and the six-hourly sync widens
+ * coverage each time rather than re-reading the same fifteen for ever. That is
+ * a deliberate trade: a slower ramp in exchange for being a crawler a site
+ * wants to keep serving.
  */
-export async function crawlJsonLdJobs(
+export type CrawlOpts = {
+  limit?: number;
+  /** Wall-clock budget for the whole crawl, in ms. */
+  budgetMs?: number;
+  /** Rotates which listing pages get expanded. See discoverJobUrls. */
+  rotate?: number;
+  /**
+   * Job URLs already imported.
+   *
+   * Not for skipping — a stored job still needs refreshing — but for ORDER.
+   * Unseen pages first means the budget goes on jobs nobody has seen, which is
+   * what makes successive runs widen coverage instead of re-reading the front
+   * page of the catalogue.
+   */
+  known?: Set<string>;
+};
+
+export type CrawlReport = {
+  jobs: NormalizedJob[];
+  /** Job URLs discovery found, whether or not they were opened. */
+  discovered: number;
+  /** Pages actually opened this run. */
+  opened: number;
+  /** Ran out of budget with pages left. */
+  truncated: boolean;
+  via: string[];
+};
+
+/** The reporting form — used by the sync loop, which explains itself to an operator. */
+export async function crawlJsonLdReport(
   listingUrl: string,
   companyFallback?: string,
-  limit = CRAWL_LIMIT
-): Promise<NormalizedJob[]> {
+  opts: CrawlOpts = {}
+): Promise<CrawlReport> {
+  const started = Date.now();
+  const deadline = started + (opts.budgetMs ?? CRAWL_BUDGET_MS);
+  const limit = opts.limit ?? CRAWL_LIMIT;
+
   const page = await safeFetch(listingUrl);
   if (!page.ok) throw new Error(`${new URL(listingUrl).hostname} → ${page.reason}`);
 
   const rules = await fetchRobots(new URL(listingUrl).origin);
-  const { urls } = await findJobPages(page.finalUrl, page.body, rules, limit);
+  const found = await discoverJobUrls(page.finalUrl, page.body, rules, {
+    limit,
+    deadline,
+    rotate: opts.rotate,
+  });
+
+  /**
+   * Unseen first, stable within each group.
+   *
+   * A plain sort would be enough, except that "known" is the majority on a
+   * mature source and we want the ORDER inside each group left alone — the site
+   * lists its newest openings first and that is a better default than anything
+   * we would invent.
+   */
+  const known = opts.known ?? new Set<string>();
+  const fresh = found.urls.filter((u) => !known.has(u));
+  const seen = found.urls.filter((u) => known.has(u));
+  const ordered = [...fresh, ...seen];
 
   // The listing page itself sometimes carries records too. Free to check.
   const jobs = jsonLdJobsFromHtml(page.body, page.finalUrl, companyFallback);
 
-  for (const p of await fetchJobPages(urls, rules)) {
+  const pages = await fetchJobPages(ordered, rules, undefined, deadline);
+  for (const p of pages) {
     jobs.push(...jsonLdJobsFromHtml(p.html, p.url, companyFallback));
   }
 
-  const seen = new Set<string>();
-  return jobs.filter((j) => (seen.has(j.externalId) ? false : (seen.add(j.externalId), true)));
+  const deduped = new Map<string, NormalizedJob>();
+  for (const j of jobs) if (!deduped.has(j.externalId)) deduped.set(j.externalId, j);
+
+  return {
+    jobs: [...deduped.values()],
+    discovered: found.urls.length,
+    opened: pages.length,
+    truncated: found.truncated || pages.length < ordered.length,
+    via: found.via,
+  };
+}
+
+/** The plain form, for callers that only want the jobs. */
+export async function crawlJsonLdJobs(
+  listingUrl: string,
+  companyFallback?: string,
+  limitOrOpts: number | CrawlOpts = {}
+): Promise<NormalizedJob[]> {
+  const opts = typeof limitOrOpts === "number" ? { limit: limitOrOpts } : limitOrOpts;
+  return (await crawlJsonLdReport(listingUrl, companyFallback, opts)).jobs;
 }
 
 // ─────────────────────────────────────────────────────────────
