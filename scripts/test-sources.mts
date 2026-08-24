@@ -149,10 +149,10 @@ const CASES: [Parameters<typeof fetchCompanyJobs>[0], string][] = [
   ["BAMBOOHR", "acme"], ["WORKDAY", "acme|wd5|CareerSite"],
 ];
 
-const got: Record<string, Awaited<ReturnType<typeof fetchCompanyJobs>>> = {};
+const got: Record<string, import("../src/lib/providers/types").NormalizedJob[]> = {};
 for (const [kind, token] of CASES) {
   try {
-    const jobs = await fetchCompanyJobs(kind, token);
+    const { jobs } = await fetchCompanyJobs(kind, token);
     got[kind] = jobs;
     const j = jobs[0];
     const ok = jobs.length === 1 && !!j.title && !!j.companyName && !!j.applyUrl &&

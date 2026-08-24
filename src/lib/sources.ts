@@ -87,7 +87,23 @@ export async function fetchSourceJobs(
   discovered?: number;
 }> {
   if (isAts(src.kind)) {
-    return { jobs: await fetchCompanyJobs(src.kind, src.token, src.companyName) };
+    /*
+     * A large board is bigger than one 60-second run, so the same resume
+     * contract the careers-site crawler uses applies here: stop on the deadline,
+     * report where, and continue there next time.
+     */
+    const page = await fetchCompanyJobs(src.kind, src.token, src.companyName, {
+      deadline: opts.deadline,
+      startOffset: src.crawlCursor ?? 0,
+    });
+    return {
+      jobs: page.jobs,
+      nextCursor: page.nextOffset,
+      note: page.complete
+        ? undefined
+        : `Read ${page.jobs.length} postings before this run's time budget ran out. ` +
+          "The next sync resumes from here.",
+    };
   }
   if (src.kind === "JSONLD") {
     return { jobs: await fetchJsonLdJobs(src.token, src.companyName) };

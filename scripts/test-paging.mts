@@ -80,6 +80,46 @@ const expired = await pageAll(
 );
 check("TC-PAGE-14 and on the clock", expired.truncated && expired.items.length === 0);
 
+
+// ─────────────────────────────────────────────────────────────
+console.log("\nRESUMING A BOARD BIGGER THAN ONE RUN\n");
+
+/**
+ * A consultancy with 3,000 postings behind a 20-per-page endpoint is minutes of
+ * polite requesting. A 60-second function cannot finish it, and the version
+ * that restarted at offset zero every night could never finish it either — it
+ * just re-read its own first pages for ever.
+ */
+const BIG_BOARD = Array.from({ length: 100 }, (_, i) => ({ id: `B${i}` }));
+const fetchBoard = async (offset: number, size: number) => BIG_BOARD.slice(offset, offset + size);
+
+const first = await pageAll(fetchBoard, (j) => j.id, 20, { maxPages: 2, delayMs: 0 });
+check("TC-PAGE-50 a run stops at its guard", first.items.length === 40, `${first.items.length}`);
+check("TC-PAGE-51 and reports where to resume", first.nextOffset === 40, `${first.nextOffset}`);
+check("TC-PAGE-52 marked incomplete", first.truncated);
+
+const second = await pageAll(fetchBoard, (j) => j.id, 20, { maxPages: 2, delayMs: 0, startOffset: first.nextOffset });
+check("TC-PAGE-53 the next run continues rather than repeating",
+  second.items[0]?.id === "B40", second.items[0]?.id);
+
+let cursor = 0, total = 0, runs = 0;
+do {
+  const r = await pageAll(fetchBoard, (j) => j.id, 20, { maxPages: 2, delayMs: 0, startOffset: cursor });
+  total += r.items.length; cursor = r.nextOffset; runs++;
+} while (cursor !== 0 && runs < 10);
+check("TC-PAGE-54 successive runs cover the whole board", total === 100 && runs === 3,
+  `${total} postings in ${runs} runs`);
+check("TC-PAGE-55 and the cursor returns to zero so the board is re-read", cursor === 0);
+
+/** The deadline must hand back a position, not lose it. */
+let calls = 0;
+const slow = await pageAll(
+  async (o, n) => { calls++; await new Promise((r) => setTimeout(r, 30)); return BIG_BOARD.slice(o, o + n); },
+  (j) => j.id, 20, { deadline: Date.now() + 45, delayMs: 0 }
+);
+check("TC-PAGE-56 the clock stops it without losing the position",
+  slow.truncated && slow.nextOffset > 0, `stopped at ${slow.nextOffset} after ${calls} calls`);
+
 // ─────────────────────────────────────────────────────────────
 console.log("\nFEEDS\n");
 

@@ -79,6 +79,34 @@ export const ATS_SOURCE: Record<AtsKind, JobSource> = {
 
 const UA = { "User-Agent": "Jobsy/1.0 (+job aggregation; contact: hello@jobsy.app)" };
 
+/**
+ * PULLING A BOARD THAT IS BIGGER THAN ONE RUN.
+ *
+ * Most ATS accounts answer in a single request and finish in under a second.
+ * A few — a global consultancy on Workday, say — have thousands of postings
+ * behind a twenty-per-page endpoint, which is minutes of polite requesting.
+ * A 60-second serverless function cannot do that in one go.
+ *
+ * So a fetch may stop early and say where it stopped. The sync loop stores that
+ * position and the next run continues from it, which is the same contract the
+ * careers-site crawler already uses. `nextOffset: 0` means the board was read to
+ * the end — and starting over next time is how changes get picked up.
+ */
+export type AtsFetchOpts = {
+  /** Absolute stop time, from the caller that knows the run's remaining budget. */
+  deadline?: number;
+  /** Where the last run stopped. */
+  startOffset?: number;
+};
+
+export type AtsPage = {
+  jobs: NormalizedJob[];
+  /** Where to resume; 0 means finished. */
+  nextOffset: number;
+  /** False when a guard or the clock stopped us with pages left. */
+  complete: boolean;
+};
+
 /** Workday refuses more than 20 per request, so this is its number, not ours. */
 const WORKDAY_PAGE = 20;
 /** SmartRecruiters allows 100 and documents `offset`. */
@@ -253,7 +281,7 @@ async function workable(account: string, company?: string): Promise<NormalizedJo
   });
 }
 
-async function smartrecruiters(companyId: string, company?: string): Promise<NormalizedJob[]> {
+async function smartrecruiters(companyId: string, company?: string, opts: AtsFetchOpts = {}): Promise<AtsPage> {
   type P = { id: string; name: string; releasedDate?: string; company?: { name?: string };
              location?: { city?: string; region?: string; country?: string; remote?: boolean };
              typeOfEmployment?: { label?: string }; department?: { label?: string };
@@ -262,7 +290,7 @@ async function smartrecruiters(companyId: string, company?: string): Promise<Nor
    * `?limit=100` without `offset` is one page, not the whole board. An employer
    * with 400 openings imported 100 and looked complete.
    */
-  const { items } = await pageAll<P>(
+  const { items, truncated, nextOffset } = await pageAll<P>(
     async (offset, pageSize) => {
       const d = await getJson<{ content?: P[] }>(
         `https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(companyId)}` +
@@ -271,7 +299,8 @@ async function smartrecruiters(companyId: string, company?: string): Promise<Nor
       return d.content ?? [];
     },
     (p) => p.id,
-    SMARTRECRUITERS_PAGE
+    SMARTRECRUITERS_PAGE,
+    { deadline: opts.deadline, startOffset: opts.startOffset }
   );
   const name = company || titleCase(companyId);
   // The list endpoint omits the description; fetch details for the newest few.
@@ -308,7 +337,7 @@ async function smartrecruiters(companyId: string, company?: string): Promise<Nor
       })
     );
   }
-  return out;
+  return { jobs: out, nextOffset, complete: !truncated };
 }
 
 async function recruitee(company_: string, company?: string): Promise<NormalizedJob[]> {
@@ -388,7 +417,7 @@ async function bamboohr(subdomain: string, company?: string): Promise<Normalized
  * Workday. Token format: "tenant|wdN|site", e.g. "nvidia|wd5|NVIDIAExternalCareerSite".
  * All three parts are visible in the company's own careers URL.
  */
-async function workday(token: string, company?: string): Promise<NormalizedJob[]> {
+async function workday(token: string, company?: string, opts: AtsFetchOpts = {}): Promise<AtsPage> {
   const [tenant, wd, site] = token.split("|");
   if (!tenant || !wd || !site) {
     throw new Error(`Workday token must be "tenant|wdN|site" — got "${token}"`);
@@ -404,7 +433,7 @@ async function workday(token: string, company?: string): Promise<NormalizedJob[]
    * thousands of openings, imported twenty — and the number looked like a
    * plausible answer rather than a page size, which is why it survived so long.
    */
-  const { items, truncated } = await pageAll<P>(
+  const { items, truncated, nextOffset } = await pageAll<P>(
     async (offset, pageSize) => {
       const d = await getJson<{ jobPostings?: P[] }>(`${base}/wday/cxs/${tenant}/${site}/jobs`, {
         method: "POST",
@@ -414,12 +443,12 @@ async function workday(token: string, company?: string): Promise<NormalizedJob[]
       return d.jobPostings ?? [];
     },
     (p) => p.externalPath,
-    WORKDAY_PAGE
+    WORKDAY_PAGE,
+    { deadline: opts.deadline, startOffset: opts.startOffset }
   );
-  if (truncated) console.warn(`[workday] ${tenant}: stopped on a paging guard at ${items.length} jobs`);
 
   const name = company || titleCase(tenant);
-  return items.map((p) =>
+  const jobs = items.map((p) =>
     shape("WORKDAY", {
       externalId: p.externalPath,
       url: `${base}/${site}${p.externalPath}`,
@@ -430,9 +459,14 @@ async function workday(token: string, company?: string): Promise<NormalizedJob[]
       postedAt: /today/i.test(p.postedOn ?? "") ? new Date() : undefined,
     })
   );
+  return { jobs, nextOffset, complete: !truncated };
 }
 
-const ADAPTERS: Record<AtsKind, (token: string, company?: string) => Promise<NormalizedJob[]>> = {
+/**
+ * Adapters that return a whole board in one call. Kept separate from the paged
+ * ones so their signatures stay honest: they have no offset to resume from.
+ */
+const ADAPTERS: Record<AtsKind, (token: string, company?: string) => Promise<NormalizedJob[] | AtsPage>> = {
   GREENHOUSE: greenhouse,
   LEVER: lever,
   ASHBY: ashby,
@@ -445,14 +479,28 @@ const ADAPTERS: Record<AtsKind, (token: string, company?: string) => Promise<Nor
 };
 
 /** Pull every job a single company currently has posted. */
-export function fetchCompanyJobs(
+/** The adapters that page, and can therefore be resumed. */
+const PAGED_ADAPTERS: Partial<
+  Record<AtsKind, (token: string, company?: string, opts?: AtsFetchOpts) => Promise<AtsPage>>
+> = {
+  WORKDAY: workday,
+  SMARTRECRUITERS: smartrecruiters,
+};
+
+export async function fetchCompanyJobs(
   kind: AtsKind,
   token: string,
-  companyName?: string
-): Promise<NormalizedJob[]> {
+  companyName?: string,
+  opts: AtsFetchOpts = {}
+): Promise<AtsPage> {
+  const paged = PAGED_ADAPTERS[kind];
+  if (paged) return paged(token, companyName, opts);
+
   const fn = ADAPTERS[kind];
   if (!fn) throw new Error(`Unknown ATS: ${kind}`);
-  return fn(token, companyName);
+  // A board that arrives in one payload is complete by definition.
+  const jobs = await fn(token, companyName);
+  return Array.isArray(jobs) ? { jobs, nextOffset: 0, complete: true } : jobs;
 }
 
 export const ATS_KINDS = Object.keys(ADAPTERS) as AtsKind[];

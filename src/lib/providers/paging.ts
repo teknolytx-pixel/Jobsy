@@ -41,6 +41,15 @@ export type PageGuards = {
   deadline?: number;
   /** Politeness between requests. */
   delayMs?: number;
+  /**
+   * Where to begin.
+   *
+   * A serverless run cannot always finish a large board, so it records where it
+   * stopped and the next run starts there. Without this the loop restarts at
+   * zero every time and a board bigger than one run's budget can never be
+   * finished — it just re-reads its own first pages for ever.
+   */
+  startOffset?: number;
 };
 
 /**
@@ -53,7 +62,7 @@ export type PageGuards = {
  * a cap was hit. If one of these ever fires it is a signal worth logging, which
  * is why the adapters do.
  */
-export const DEFAULT_GUARDS: Required<Omit<PageGuards, "deadline">> = {
+export const DEFAULT_GUARDS: Required<Omit<PageGuards, "deadline" | "startOffset">> = {
   maxPages: 400,
   maxItems: 20_000,
   delayMs: 150,
@@ -64,6 +73,13 @@ export type PageResult<T> = {
   /** True when a guard stopped us rather than the data running out. */
   truncated: boolean;
   pages: number;
+  /**
+   * Where the next run should start.
+   *
+   * Zero when the board was read to the end — which is deliberate, because
+   * starting over is how a board that has since changed gets refreshed.
+   */
+  nextOffset: number;
 };
 
 /**
@@ -81,12 +97,17 @@ export async function pageAll<T>(
   guards: PageGuards = {}
 ): Promise<PageResult<T>> {
   const g = { ...DEFAULT_GUARDS, ...guards };
+  const start = Math.max(0, guards.startOffset ?? 0);
   const seen = new Set<string>();
   const items: T[] = [];
   let pages = 0;
+  let offset = start;
 
-  for (let offset = 0; pages < g.maxPages; offset += pageSize) {
-    if (guards.deadline && Date.now() > guards.deadline) return { items, truncated: true, pages };
+  for (; pages < g.maxPages; offset += pageSize) {
+    // Out of time: hand back where to resume rather than losing the position.
+    if (guards.deadline && Date.now() > guards.deadline) {
+      return { items, truncated: true, pages, nextOffset: offset };
+    }
 
     const page = await fetchPage(offset, pageSize);
     pages++;
@@ -98,18 +119,20 @@ export async function pageAll<T>(
       seen.add(k);
       items.push(item);
       added++;
-      if (items.length >= g.maxItems) return { items, truncated: true, pages };
+      if (items.length >= g.maxItems) {
+        return { items, truncated: true, pages, nextOffset: offset + pageSize };
+      }
     }
 
     // Nothing new: either the end, or an endpoint that ignores our offset.
-    if (added === 0) return { items, truncated: false, pages };
+    if (added === 0) return { items, truncated: false, pages, nextOffset: 0 };
     // A short page is the end of the data on every paginated API worth the name.
-    if (page.length < pageSize) return { items, truncated: false, pages };
+    if (page.length < pageSize) return { items, truncated: false, pages, nextOffset: 0 };
 
     if (g.delayMs) await new Promise((r) => setTimeout(r, g.delayMs));
   }
 
-  return { items, truncated: true, pages };
+  return { items, truncated: true, pages, nextOffset: offset };
 }
 
 // ─────────────────────────────────────────────────────────────

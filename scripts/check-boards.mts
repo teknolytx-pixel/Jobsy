@@ -106,7 +106,7 @@ type Outcome = { t: Target; n: number; err: string | null; blocked: boolean };
 
 const results = await mapLimit(targets, 4, async (t): Promise<Outcome> => {
   try {
-    const jobs = await fetchCompanyJobs(t.kind as never, t.token, t.token);
+    const { jobs } = await fetchCompanyJobs(t.kind as never, t.token, t.token);
     return { t, n: jobs.length, err: null, blocked: false };
   } catch (e) {
     const msg = ((e as Error).message ?? String(e)).slice(0, 120);

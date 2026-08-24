@@ -16,7 +16,3 @@ node_modules/
 
 # Stale git lock files parked here — the desktop mount cannot delete files.
 _to_delete/
-
-# Build artifact — TypeScript rewrites it on every compile, so committing it
-# produces a spurious diff on every branch and a conflict on every merge.
-tsconfig.tsbuildinfo
