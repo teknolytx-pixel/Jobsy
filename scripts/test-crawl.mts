@@ -528,6 +528,7 @@ const oneOnly = await report("https://ord.com/careers", "Ord", {
   known: new Set(["https://ord.com/job/100/old-known-engineer"]),
   limit: 2,
   budgetMs: 30_000,
+  deps: PUBLIC_DNS,
 });
 check("TC-CRAWL-170 a page we have never seen is opened first",
   oneOnly.jobs[0]?.title === "New Unknown Engineer",
@@ -537,6 +538,91 @@ check("TC-CRAWL-171 and the report counts what it found and what it read",
   `${oneOnly.discovered} found, ${oneOnly.opened} read`);
 
 globalThis.fetch = prevFetch;
+
+
+// ─────────────────────────────────────────────────────────────
+// WHOSE JOBS ARE THESE?
+//
+// Citi connected and appeared in the sources list as "Early Career". The
+// administrator looked for "Citi", didn't find it, and concluded the connection
+// had failed. The fifteen imported jobs carried the same label.
+// ─────────────────────────────────────────────────────────────
+console.log("\nEMPLOYER NAMES\n");
+
+const { employerFromHost, employerNameFrom, looksLikeSection } = await import("../src/lib/employer");
+
+check("TC-CRAWL-180 a programme name is not an employer", looksLikeSection("Early Career"));
+check("TC-CRAWL-181 nor is a menu item",
+  ["Careers", "Jobs", "Job Search", "Search", "Apply Now", "Opportunities", "Talent"].every(looksLikeSection));
+check("TC-CRAWL-182 but a real company that CONTAINS one is",
+  !looksLikeSection("Careers Australia") && !looksLikeSection("Talent Inc"));
+check("TC-CRAWL-183 and so is an ordinary company", !looksLikeSection("Citigroup"));
+
+check("TC-CRAWL-184 the domain names the employer", employerFromHost("jobs.citi.com") === "Citi",
+  employerFromHost("jobs.citi.com"));
+check("TC-CRAWL-185 short labels are initialisms", employerFromHost("careers.td.com") === "TD",
+  employerFromHost("careers.td.com"));
+check("TC-CRAWL-186 compound suffixes are handled",
+  employerFromHost("www.bespokeco.co.uk") === "Bespokeco", employerFromHost("www.bespokeco.co.uk"));
+check("TC-CRAWL-187 a two-label host keeps its own name",
+  employerFromHost("jobs.com") === "Jobs", employerFromHost("jobs.com"));
+
+/** The exact failure. */
+const citi = employerNameFrom({
+  jsonLdNames: ["Early Career", "Early Career", "Early Career"],
+  siteName: "Careers",
+  url: "https://jobs.citi.com/search-jobs",
+});
+check("TC-CRAWL-190 a site that only ever says 'Early Career' is named from its domain",
+  citi === "Citi", citi);
+
+/** The company usually wins on volume; the mode is the right statistic. */
+const mixed = employerNameFrom({
+  jsonLdNames: ["Early Career", "Citigroup", "Citigroup", "Citigroup"],
+  url: "https://jobs.citi.com/search-jobs",
+});
+check("TC-CRAWL-191 the most common real name wins over a one-off", mixed === "Citigroup", mixed);
+
+check("TC-CRAWL-192 og:site_name is used when the records say nothing useful",
+  employerNameFrom({ jsonLdNames: ["Jobs"], siteName: "Bespoke Co", url: "https://x.io/careers" }) === "Bespoke Co");
+check("TC-CRAWL-193 and a real record still beats everything",
+  employerNameFrom({ jsonLdNames: ["Acme Industrial"], siteName: "Careers", url: "https://jobs.acme.com" }) ===
+    "Acme Industrial");
+
+/** End to end: the jobs themselves must carry the employer, not the programme. */
+const PROG: Record<string, string> = {
+  "https://jobs.megabank.com/robots.txt": "User-agent: *\nAllow: /\n",
+  "https://jobs.megabank.com/search-jobs": `<html><head><meta property="og:site_name" content="Careers"></head>
+    <body><a href="/job/9001/analyst-technology-programme">a</a></body></html>`,
+  "https://jobs.megabank.com/job/9001/analyst-technology-programme": `<html><head>
+    <script type="application/ld+json">${JSON.stringify({
+      "@context": "https://schema.org/", "@type": "JobPosting", title: "Technology Analyst",
+      description: "<p>Python and SQL.</p>", datePosted: "2026-08-20",
+      hiringOrganization: { "@type": "Organization", name: "Early Career" },
+      identifier: { "@type": "PropertyValue", value: "9001" },
+    })}</script></head><body>x</body></html>`,
+};
+const before = globalThis.fetch;
+globalThis.fetch = (async (input: RequestInfo | URL) => {
+  const url = (typeof input === "string" ? input : input.toString()).replace(/\/$/, "");
+  const body = PROG[url] ?? PROG[url + "/"];
+  if (body === undefined) return new Response("", { status: 404 });
+  return new Response(body, { status: 200, headers: { "Content-Type": "text/html" } });
+}) as typeof fetch;
+
+const detected = await detectSource("https://jobs.megabank.com/search-jobs", PUBLIC_DNS);
+check("TC-CRAWL-194 detection names the employer, not the programme",
+  detected.kind === "JSONLD_CRAWL" && detected.companyName === "Megabank",
+  detected.kind ? detected.companyName : (detected.reason ?? ""));
+
+const { crawlJsonLdReport: rep } = await import("../src/lib/providers/universal");
+const progRun = await rep("https://jobs.megabank.com/search-jobs", "Early Career", { budgetMs: 20_000, deps: PUBLIC_DNS });
+check("TC-CRAWL-195 and so do the jobs it imports",
+  progRun.jobs[0]?.companyName === "Megabank", progRun.jobs[0]?.companyName);
+check("TC-CRAWL-196 and the run reports the employer it settled on",
+  progRun.employer === "Megabank", progRun.employer);
+
+globalThis.fetch = before;
 
 globalThis.fetch = realFetch;
 console.log(`\n${pass} passed, ${fail} failed  —  crawl\n`);

@@ -3,6 +3,7 @@ import { safeFetch, type SafeFetchDeps } from "./safeFetch";
 import { ATS_LABEL } from "./providers/ats";
 import { recogniseVendor } from "./vendors";
 import { PROBE_LIMIT, fetchJobPages, fetchRobots, findJobPages, robotsAllows } from "./crawl";
+import { employerNameFrom } from "./employer";
 
 /**
  * CAREERS-URL AUTO-DETECTION.
@@ -309,14 +310,25 @@ export async function detectSource(
   // opened here: this is a question ("is this site readable?"), not an import.
   const { urls, via } = await findJobPages(fetched.finalUrl, html, rules, PROBE_LIMIT, deps);
   if (urls.length) {
-    for (const page of await fetchJobPages(urls, rules, deps)) {
-      const found = findJsonLdJobPostings(page.html);
-      if (!found.length) continue;
-      const org = found[0]?.hiringOrganization as { name?: string } | undefined;
+    const probed = await fetchJobPages(urls, rules, deps);
+    const records = probed.flatMap((p) => findJsonLdJobPostings(p.html));
+    if (records.length) {
       return {
         kind: "JSONLD_CRAWL",
         token: fetched.finalUrl,
-        companyName: (org?.name ?? siteNameFrom(html) ?? domainName).slice(0, 80),
+        /*
+         * Across every probed page, not the first record.
+         *
+         * Taking the first is how Citi's connection ended up called "Early
+         * Career" — a programme name in one record, mistaken for the employer.
+         */
+        companyName: employerNameFrom({
+          jsonLdNames: records.map(
+            (n) => ((n.hiringOrganization as { name?: string } | undefined)?.name ?? "")
+          ),
+          siteName: siteNameFrom(html),
+          url: fetched.finalUrl,
+        }),
         label: "Career site (job pages)",
         confidence: "certain",
         via:

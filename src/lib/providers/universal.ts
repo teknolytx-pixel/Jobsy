@@ -7,7 +7,8 @@ import {
   fetchJobPages,
   fetchRobots,
 } from "../crawl";
-import { safeFetch } from "../safeFetch";
+import { safeFetch, type SafeFetchDeps } from "../safeFetch";
+import { employerForJob, employerNameFrom } from "../employer";
 import {
   type NormalizedJob,
   inferEmploymentType,
@@ -80,7 +81,13 @@ export function jsonLdJobsFromHtml(
 
   return nodes.map((n, i): NormalizedJob => {
     const org = n.hiringOrganization as Record<string, unknown> | undefined;
-    const company = str(org?.name) || companyFallback || new URL(pageUrl).hostname;
+    /*
+     * Not `str(org.name) || fallback`. That is what produced fifteen Citi jobs
+     * labelled "Early Career": the record named a PROGRAMME, the code took the
+     * first non-empty string, and the employer's name never appeared anywhere a
+     * candidate could see it.
+     */
+    const company = employerForJob(str(org?.name), companyFallback, pageUrl);
     const description = stripHtml(str(n.description));
     const { text: location, remote } = readLocation(n);
     const [min, max, currency] = readSalary(n);
@@ -160,10 +167,21 @@ export type CrawlOpts = {
    * page of the catalogue.
    */
   known?: Set<string>;
+  /**
+   * Injected DNS resolution, exactly as safeFetch takes it.
+   *
+   * Present so the crawl is testable against recorded fixtures the same way
+   * detection already is. Without it the tests reached the real resolver and
+   * passed only for fixture domains that happen to exist — which is a test
+   * suite quietly depending on the internet.
+   */
+  deps?: SafeFetchDeps;
 };
 
 export type CrawlReport = {
   jobs: NormalizedJob[];
+  /** The employer this run concluded the site belongs to. */
+  employer: string;
   /** Job URLs discovery found, whether or not they were opened. */
   discovered: number;
   /** Pages actually opened this run. */
@@ -183,14 +201,15 @@ export async function crawlJsonLdReport(
   const deadline = started + (opts.budgetMs ?? CRAWL_BUDGET_MS);
   const limit = opts.limit ?? CRAWL_LIMIT;
 
-  const page = await safeFetch(listingUrl);
+  const page = await safeFetch(listingUrl, opts.deps);
   if (!page.ok) throw new Error(`${new URL(listingUrl).hostname} → ${page.reason}`);
 
-  const rules = await fetchRobots(new URL(listingUrl).origin);
+  const rules = await fetchRobots(new URL(listingUrl).origin, opts.deps);
   const found = await discoverJobUrls(page.finalUrl, page.body, rules, {
     limit,
     deadline,
     rotate: opts.rotate,
+    deps: opts.deps,
   });
 
   /**
@@ -206,12 +225,29 @@ export async function crawlJsonLdReport(
   const seen = found.urls.filter((u) => known.has(u));
   const ordered = [...fresh, ...seen];
 
-  // The listing page itself sometimes carries records too. Free to check.
-  const jobs = jsonLdJobsFromHtml(page.body, page.finalUrl, companyFallback);
+  const pages = await fetchJobPages(ordered, rules, opts.deps, deadline);
 
-  const pages = await fetchJobPages(ordered, rules, undefined, deadline);
+  /*
+   * Resolve the employer ONCE, across every record read, before naming any job.
+   *
+   * Per-page resolution would let one page's programme name ("Early Career")
+   * label the jobs on that page while the rest carried the company — the same
+   * source appearing under two employers in the deck.
+   */
+  const employer = employerNameFrom({
+    jsonLdNames: [page.body, ...pages.map((p) => p.html)].flatMap((html) =>
+      findJsonLdJobPostings(html).map((n) =>
+        str((n.hiringOrganization as Record<string, unknown> | undefined)?.name)
+      )
+    ),
+    stored: companyFallback,
+    url: page.finalUrl,
+  });
+
+  // The listing page itself sometimes carries records too. Free to check.
+  const jobs = jsonLdJobsFromHtml(page.body, page.finalUrl, employer);
   for (const p of pages) {
-    jobs.push(...jsonLdJobsFromHtml(p.html, p.url, companyFallback));
+    jobs.push(...jsonLdJobsFromHtml(p.html, p.url, employer));
   }
 
   const deduped = new Map<string, NormalizedJob>();
@@ -219,6 +255,7 @@ export async function crawlJsonLdReport(
 
   return {
     jobs: [...deduped.values()],
+    employer,
     discovered: found.urls.length,
     opened: pages.length,
     truncated: found.truncated || pages.length < ordered.length,

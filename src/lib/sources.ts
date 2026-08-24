@@ -12,6 +12,7 @@ import { ATS_LABEL, ATS_SOURCE, fetchCompanyJobs, type AtsKind } from "./provide
 import { crawlJsonLdReport, fetchJsonLdJobs, fetchXmlFeedJobs } from "./providers/universal";
 import type { NormalizedJob } from "./providers/types";
 import { upsertJob } from "./ingest";
+import { looksLikeSection } from "./employer";
 
 /**
  * CONNECTED COMPANIES — the continuous half of ingestion.
@@ -77,7 +78,7 @@ async function knownUrlsFor(listingUrl: string): Promise<Set<string>> {
 /** Fetch every job a connected source currently exposes. */
 export async function fetchSourceJobs(
   src: Pick<JobSourceRow, "kind" | "token" | "companyName">
-): Promise<{ jobs: NormalizedJob[]; note?: string }> {
+): Promise<{ jobs: NormalizedJob[]; note?: string; employer?: string }> {
   if (isAts(src.kind)) {
     return { jobs: await fetchCompanyJobs(src.kind, src.token, src.companyName) };
   }
@@ -91,6 +92,7 @@ export async function fetchSourceJobs(
     });
     return {
       jobs: report.jobs,
+      employer: report.employer,
       note: report.truncated
         ? `Found ${report.discovered} job pages and read ${report.opened} within this run's time budget` +
           `${report.via.length ? ` (via ${report.via.join("; ")})` : ""}. ` +
@@ -230,6 +232,28 @@ export async function syncSource(src: JobSourceRow): Promise<SyncResult> {
     const fetched = await fetchSourceJobs(src);
     out.fetched = fetched.jobs.length;
     out.note = fetched.note;
+
+    /*
+     * Repair a name we got wrong.
+     *
+     * Citi connected as "Early Career" — a programme name lifted from one job
+     * record — and an administrator could not find it in their own list. Now
+     * that the employer is resolved across every record read, a source whose
+     * stored name is a section heading corrects itself on the next sync.
+     *
+     * Only for auto-detected sources, and only when the stored name is one of
+     * the names we should never have chosen. A name somebody typed is theirs.
+     */
+    if (fetched.employer && src.autoDetected && looksLikeSection(src.companyName)) {
+      if (fetched.employer !== src.companyName) {
+        await db
+          .update(jobSources)
+          .set({ companyName: fetched.employer })
+          .where(eq(jobSources.id, src.id));
+        out.company = fetched.employer;
+        out.note = `Renamed from "${src.companyName}" to "${fetched.employer}" — the old name came from one job posting rather than the employer.`;
+      }
+    }
     for (const j of fetched.jobs) {
       try {
         const r = await upsertJob(j);
