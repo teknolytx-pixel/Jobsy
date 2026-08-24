@@ -132,14 +132,16 @@ check("TC-PAGE-21 namespaced and entity-encoded links too",
 check("TC-PAGE-22 a self link is not a next link",
   nextLinkFrom(`<link rel="self" href="/f"/>`, "https://a.com/f") === null);
 
+/* Looked up by NAME, not by index — the list grows as feeds teach us new schemes. */
+const param = (n: string) => PAGE_PARAMS.find((p) => p.name === n)!;
 check("TC-PAGE-23 page-number schemes count pages",
-  pagedUrl("https://a.com/f", PAGE_PARAMS[0], 20, 1).endsWith("page=2"),
-  pagedUrl("https://a.com/f", PAGE_PARAMS[0], 20, 1));
+  pagedUrl("https://a.com/f", param("page"), 20, 1).endsWith("page=2"),
+  pagedUrl("https://a.com/f", param("page"), 20, 1));
 check("TC-PAGE-24 row-offset schemes count rows",
-  pagedUrl("https://a.com/f", PAGE_PARAMS[1], 20, 1).endsWith("startrow=20"),
-  pagedUrl("https://a.com/f", PAGE_PARAMS[1], 20, 1));
+  pagedUrl("https://a.com/f", param("startrow"), 20, 1).endsWith("startrow=20"),
+  pagedUrl("https://a.com/f", param("startrow"), 20, 1));
 check("TC-PAGE-25 existing query parameters survive",
-  pagedUrl("https://a.com/f?loc=us", PAGE_PARAMS[0], 20, 1).includes("loc=us"));
+  pagedUrl("https://a.com/f?loc=us", param("page"), 20, 1).includes("loc=us"));
 
 // ─────────────────────────────────────────────────────────────
 console.log("\nEND TO END\n");
@@ -186,6 +188,58 @@ check("TC-PAGE-40 a feed that ignores paging still returns its jobs",
   stubborn.length === 20, `${stubborn.length}`);
 check("TC-PAGE-41 and is abandoned after one probe per scheme, not looped",
   feedHits <= 1 + PAGE_PARAMS.length, `${feedHits} requests for ${PAGE_PARAMS.length} schemes`);
+
+
+// ─────────────────────────────────────────────────────────────
+console.log("\nA FEED WITH A DECORATIVE NEXT LINK\n");
+
+/**
+ * The bug this covers is the reason a large employer's feed stopped at twenty.
+ *
+ * Plenty of careers feeds emit a rel="next" that points back at themselves, or
+ * at a page that 404s — boilerplate from a template nobody checked. The first
+ * version treated "we tried a next link" as "this feed is paginated", returned
+ * whatever it had, and never probed the query parameter that actually worked.
+ * One decorative tag was enough to cap an employer at a single page.
+ */
+const DECOY_TOTAL = 45;
+let decoyHits = 0;
+const prevFetch2 = globalThis.fetch;
+globalThis.fetch = (async (input: RequestInfo | URL) => {
+  const u = new URL(typeof input === "string" ? input : input.toString());
+  decoyHits++;
+  if (u.hostname !== "decoy.example") return new Response("", { status: 404 });
+  const start = Number(u.searchParams.get("startrow") ?? 0);
+  const slice = Array.from({ length: DECOY_TOTAL }, (_, i) => i).slice(start, start + 20);
+  // The decoy: every page claims a next link pointing at the un-paged URL.
+  return new Response(
+    `<?xml version="1.0"?><source>` +
+      `<link rel="next" href="https://decoy.example/feed"/>` +
+      slice.map(job).join("") +
+      `</source>`,
+    { status: 200, headers: { "Content-Type": "application/xml" } }
+  );
+}) as typeof fetch;
+
+const { fetchXmlFeedReport } = await import("../src/lib/providers/universal");
+const decoy = await fetchXmlFeedReport("https://decoy.example/feed");
+check("TC-PAGE-60 a self-referential next link does not cap the feed",
+  decoy.jobs.length === DECOY_TOTAL, `${decoy.jobs.length} of ${DECOY_TOTAL}`);
+check("TC-PAGE-61 the working scheme is found and named",
+  decoy.pagedBy === "?startrow=", decoy.pagedBy ?? "none");
+check("TC-PAGE-62 and the page count is reported", decoy.pages > 1, `${decoy.pages} pages`);
+
+/** A feed that really is one page says so, rather than looking like a failure. */
+globalThis.fetch = (async () =>
+  new Response(`<?xml version="1.0"?><source>${[1, 2, 3].map(job).join("")}</source>`,
+    { status: 200, headers: { "Content-Type": "application/xml" } })) as typeof fetch;
+const small = await fetchXmlFeedReport("https://small.example/feed");
+check("TC-PAGE-63 a genuinely small feed reports no paging",
+  small.jobs.length === 3 && small.pagedBy === null, `${small.jobs.length}, ${small.pagedBy}`);
+check("TC-PAGE-64 and is not probed nine times to learn it",
+  small.pages === 1, `${small.pages} requests`);
+
+globalThis.fetch = prevFetch2;
 
 globalThis.fetch = realFetch;
 console.log(`\n${pass} passed, ${fail} failed  —  paging\n`);

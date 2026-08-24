@@ -9,7 +9,7 @@ import {
 } from "@/db";
 import { detectSource, type Detection, type DetectionFailure } from "./discovery";
 import { ATS_LABEL, ATS_SOURCE, fetchCompanyJobs, type AtsKind } from "./providers/ats";
-import { crawlJsonLdReport, fetchJsonLdJobs, fetchXmlFeedJobs } from "./providers/universal";
+import { crawlJsonLdReport, fetchJsonLdJobs, fetchXmlFeedReport } from "./providers/universal";
 import type { NormalizedJob } from "./providers/types";
 import { upsertJob } from "./ingest";
 import { looksLikeSection } from "./employer";
@@ -135,7 +135,21 @@ export async function fetchSourceJobs(
         : undefined,
     };
   }
-  return { jobs: await fetchXmlFeedJobs(src.token, src.companyName) };
+  /*
+   * The note matters more than it looks. "20 jobs" and "20 jobs, one page, no
+   * pagination scheme worked" appear identical in the sources list and mean
+   * completely different things — a small employer, versus a feed we are
+   * failing to walk. Saying which removes the guesswork.
+   */
+  const feed = await fetchXmlFeedReport(src.token, src.companyName);
+  return {
+    jobs: feed.jobs,
+    note:
+      feed.pages > 1
+        ? `Read ${feed.pages} pages of the feed (paged by ${feed.pagedBy}).`
+        : `The feed returned one page of ${feed.jobs.length} jobs and offers no next link or working page parameter. ` +
+          "If this employer has more openings, ask them for their full feed URL.",
+  };
 }
 
 /** The `jobs.source` value rows from this connector should carry. */

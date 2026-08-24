@@ -634,10 +634,34 @@ function CandidatesPanel() {
   const [data, setData] = useState<Data | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  /**
+   * A failed load is not a slow load.
+   *
+   * The first version did `if (r.ok) setData(...)` and nothing else, so any
+   * error left the panel on "Loading…" for ever — which is exactly what an
+   * administrator saw when the tables had not been migrated yet. The server was
+   * returning a clear 503 saying "run the pending migration"; the screen threw
+   * it away and showed a spinner. A screen that cannot fail is a screen that
+   * lies.
+   */
+  const [error, setError] = useState<{ message: string; hint?: string } | null>(null);
 
   const load = async () => {
-    const r = await fetch("/api/admin/candidates", { cache: "no-store" });
-    if (r.ok) setData(await r.json());
+    setError(null);
+    try {
+      const r = await fetch("/api/admin/candidates", { cache: "no-store" });
+      const body = await r.json().catch(() => null);
+      if (!r.ok) {
+        setError({
+          message: body?.error ?? `The server returned ${r.status}.`,
+          hint: body?.suggestions?.[0],
+        });
+        return;
+      }
+      setData(body);
+    } catch {
+      setError({ message: "Couldn't reach the server. Check your connection and reload." });
+    }
   };
   useEffect(() => { void load(); }, []);
 
@@ -663,6 +687,19 @@ function CandidatesPanel() {
       setBusy(null);
     }
   };
+
+  if (error) {
+    return (
+      <div className="notice" style={{ borderColor: "var(--bad)" }}>
+        <b>Candidate sourcing isn&rsquo;t available.</b>
+        <div style={{ marginTop: 6 }}>{error.message}</div>
+        {error.hint ? <div style={{ marginTop: 6, color: "var(--dim2)" }}>{error.hint}</div> : null}
+        <button className="ghost" style={{ marginTop: 10 }} onClick={() => void load()}>
+          Try again
+        </button>
+      </div>
+    );
+  }
 
   if (!data) return <div className="emptylist">Loading…</div>;
 

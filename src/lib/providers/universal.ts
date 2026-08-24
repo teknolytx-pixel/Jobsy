@@ -358,7 +358,7 @@ const itemKey = (block: string): string =>
 async function allFeedPages(
   feedUrl: string,
   guards: PageGuards = {}
-): Promise<{ blocks: string[]; pages: number; truncated: boolean }> {
+): Promise<{ blocks: string[]; pages: number; truncated: boolean; pagedBy: string | null }> {
   const g = { ...DEFAULT_GUARDS, ...guards };
   const seen = new Set<string>();
   const blocks: string[] = [];
@@ -383,14 +383,16 @@ async function allFeedPages(
     return res.text();
   };
 
+  let pagedBy: string | null = null;
+
   const first = await fetchXml(feedUrl);
   const pageSize = take(first);
-  if (!pageSize) return { blocks, pages, truncated: false };
+  if (!pageSize) return { blocks, pages, truncated: false, pagedBy };
 
   // ── 1. a declared next link, followed as far as it goes ──
   let next = nextLinkFrom(first, feedUrl);
   while (next && pages < g.maxPages && blocks.length < g.maxItems) {
-    if (guards.deadline && Date.now() > guards.deadline) return { blocks, pages, truncated: true };
+    if (guards.deadline && Date.now() > guards.deadline) return { blocks, pages, truncated: true, pagedBy };
     let xml: string;
     try {
       xml = await fetchXml(next);
@@ -398,12 +400,35 @@ async function allFeedPages(
       break;
     }
     if (take(xml) === 0) break;
+    pagedBy = pagedBy ?? 'a rel="next" link';
     next = nextLinkFrom(xml, next);
     if (g.delayMs) await new Promise((r) => setTimeout(r, g.delayMs));
   }
-  if (pages > 1) return { blocks, pages, truncated: blocks.length >= g.maxItems };
+  /*
+   * Only stop here if the next link actually PRODUCED something.
+   *
+   * The first version returned whenever `pages > 1`, which included the case
+   * where a decorative or self-referential rel="next" was followed once,
+   * yielded nothing new, and broke out of the loop. A feed like that got
+   * exactly one page and the parameter probing below never ran — which is
+   * precisely the shape of "this employer imported twenty jobs and stopped".
+   */
+  if (blocks.length > pageSize) return { blocks, pages, truncated: blocks.length >= g.maxItems, pagedBy };
 
-  // ── 2. no next link: probe the common parameters, verifying each ──
+  /*
+   * A short first page is the whole feed, and probing it is rude.
+   *
+   * Paginated feeds do not have a page size of three. Without this check every
+   * sync of every small employer spent nine wasted requests learning that none
+   * of the nine schemes did anything — nine times the traffic, on the feeds
+   * least able to justify it. The trade is that a feed which genuinely paginates
+   * at fewer than ten per page is missed; no such feed has been seen, and the
+   * note on the source says how many pages were read, so it would be visible.
+   */
+  const PROBE_FLOOR = 10;
+  if (pageSize < PROBE_FLOOR) return { blocks, pages, truncated: false, pagedBy };
+
+  // ── 2. no usable next link: probe the common parameters, verifying each ──
   for (const param of PAGE_PARAMS) {
     if (guards.deadline && Date.now() > guards.deadline) break;
     let worked = false;
@@ -418,17 +443,49 @@ async function allFeedPages(
       // end. Either way this scheme has nothing more to give.
       if (take(xml) === 0) break;
       worked = true;
+      pagedBy = `?${param.name}=`;
       if (g.delayMs) await new Promise((r) => setTimeout(r, g.delayMs));
     }
     if (worked) break; // a scheme that works is the site's scheme; stop guessing
   }
 
-  return { blocks, pages, truncated: blocks.length >= g.maxItems };
+  return { blocks, pages, truncated: blocks.length >= g.maxItems, pagedBy };
 }
 
-export async function fetchXmlFeedJobs(feedUrl: string, companyFallback?: string): Promise<NormalizedJob[]> {
-  const { blocks, pages } = await allFeedPages(feedUrl);
-  if (pages > 1) console.info(`[feed] ${new URL(feedUrl).hostname}: ${blocks.length} jobs across ${pages} pages`);
+/**
+ * A feed read, with the paging outcome attached.
+ *
+ * Reported rather than logged, because "twenty jobs" and "twenty jobs and we
+ * could not find a second page" look identical in the sources list and mean
+ * completely different things — one is a small employer, the other is a feed we
+ * are failing to walk. Without this the operator has to guess, and so do I.
+ */
+export type FeedReport = { jobs: NormalizedJob[]; pages: number; pagedBy: string | null };
+
+export async function fetchXmlFeedReport(
+  feedUrl: string,
+  companyFallback?: string
+): Promise<FeedReport> {
+  const jobs = await fetchXmlFeedJobs(feedUrl, companyFallback, LAST_READ);
+  return { jobs, pages: LAST_READ.pages, pagedBy: LAST_READ.pagedBy };
+}
+
+/** Filled by the most recent read, for the report wrapper above. */
+const LAST_READ: { pages: number; pagedBy: string | null } = { pages: 0, pagedBy: null };
+
+export async function fetchXmlFeedJobs(
+  feedUrl: string,
+  companyFallback?: string,
+  out?: { pages: number; pagedBy: string | null }
+): Promise<NormalizedJob[]> {
+  const { blocks, pages, pagedBy } = await allFeedPages(feedUrl);
+  if (out) {
+    out.pages = pages;
+    out.pagedBy = pagedBy;
+  }
+  LAST_READ.pages = pages;
+  LAST_READ.pagedBy = pagedBy;
+  if (pages > 1) console.info(`[feed] ${new URL(feedUrl).hostname}: ${blocks.length} jobs across ${pages} pages (${pagedBy})`);
   const items = blocks;
   const host = new URL(feedUrl).hostname;
 

@@ -162,10 +162,17 @@ export function nextLinkFrom(xml: string, base: string): string | null {
  * survives if it changes the response — see the note at the top of this file.
  */
 export const PAGE_PARAMS = [
+  // Page counters.
   { name: "page", firstValue: 2, step: 1 },
-  { name: "startrow", firstValue: -1, step: -1 }, // -1 means "one page size"
+  { name: "pageNumber", firstValue: 2, step: 1 },
+  { name: "pg", firstValue: 2, step: 1 },
+  // Row offsets. firstValue -1 means "one page size", i.e. 20, 40, 60…
+  { name: "startrow", firstValue: -1, step: -1 },
   { name: "start", firstValue: -1, step: -1 },
   { name: "offset", firstValue: -1, step: -1 },
+  { name: "jobOffset", firstValue: -1, step: -1 },
+  { name: "startIndex", firstValue: -1, step: -1 },
+  { name: "from", firstValue: -1, step: -1 },
 ] as const;
 
 /** The URL for page two under one candidate scheme. */
