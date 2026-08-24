@@ -743,7 +743,7 @@ function CandidatesPanel() {
         <b>Candidate sourcing isn&rsquo;t available.</b>
         <div style={{ marginTop: 6 }}>{error.message}</div>
         {error.hint ? <div style={{ marginTop: 6, color: "var(--dim2)" }}>{error.hint}</div> : null}
-        <button className="ghost" style={{ marginTop: 10 }} onClick={() => void load()}>
+        <button className="btn ghost" style={{ marginTop: 10, width: "auto", padding: "10px 16px" }} onClick={() => void load()}>
           Try again
         </button>
       </div>
@@ -816,7 +816,7 @@ function CandidatesPanel() {
                 <div style={{ fontSize: 12.5, color: "var(--bad)" }}>{src.lastError}</div>
               ) : null}
             </div>
-            <button className="ghost" disabled={busy === src.id} onClick={() => void sync(src.id)}>
+            <button className="btn ghost" style={{ width: "auto", padding: "10px 16px", marginTop: 0 }} disabled={busy === src.id} onClick={() => void sync(src.id)}>
               {busy === src.id ? "Syncing…" : "Sync now"}
             </button>
           </div>
@@ -889,7 +889,7 @@ function CandidatesPanel() {
       </div>
 
       <button
-        className="primary"
+        className="btn"
         disabled={connecting || !form.companyId || !form.label || form.secret.length < 8}
         onClick={() => void connect()}
       >
