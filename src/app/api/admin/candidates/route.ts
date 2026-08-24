@@ -1,3 +1,4 @@
+import { allOrFail } from "@/lib/allOrFail";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
@@ -30,7 +31,7 @@ export const maxDuration = 120;
 export async function GET() {
   try {
     await requirePlatformAdmin();
-    const [stats, sources] = await Promise.all([candidateStats(), sourceRollup()]);
+    const [stats, sources] = await allOrFail([candidateStats(), sourceRollup()]);
 
     return NextResponse.json({
       stats,

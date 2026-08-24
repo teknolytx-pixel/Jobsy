@@ -1,3 +1,4 @@
+import { allOrFail } from "@/lib/allOrFail";
 import { NextResponse } from "next/server";
 import { and, count, eq, gte, isNotNull, isNull, sql } from "drizzle-orm";
 import { db, emailLogs, jobSources, resumes } from "@/db";
@@ -29,7 +30,7 @@ export async function GET(req: Request) {
 
   const since = new Date(Date.now() - WINDOW_DAYS * 86_400_000);
 
-  const [byStatus, sources, resumeRows, stored, drift] = await Promise.all([
+  const [byStatus, sources, resumeRows, stored, drift] = await allOrFail([
     db
       .select({ status: emailLogs.status, n: count() })
       .from(emailLogs)

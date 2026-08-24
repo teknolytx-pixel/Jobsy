@@ -1,3 +1,4 @@
+import { allOrFail } from "@/lib/allOrFail";
 import { desc, eq, or } from "drizzle-orm";
 import {
   db,
@@ -86,7 +87,7 @@ export async function buildExport(user: User): Promise<ExportBundle> {
     postedJobs,
     resumeRows,
     emails,
-  ] = await Promise.all([
+  ] = await allOrFail([
     db.select().from(termsAcceptances).where(eq(termsAcceptances.userId, user.id)),
     db.select().from(aedtNotices).where(eq(aedtNotices.userId, user.id)),
     db.select().from(privacyRequests).where(eq(privacyRequests.userId, user.id)),

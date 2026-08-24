@@ -1,3 +1,4 @@
+import { allOrFail } from "@/lib/allOrFail";
 import { NextResponse } from "next/server";
 import { and, count, desc, eq, lt, sql } from "drizzle-orm";
 import { db, aedtNotices, auditLog, privacyRequests, reports, users } from "@/db";
@@ -23,7 +24,7 @@ export async function GET(req: Request) {
 
   const now = new Date();
 
-  const [open, overdue, noticeCount, openReports, escalatedReports, optOuts] = await Promise.all([
+  const [open, overdue, noticeCount, openReports, escalatedReports, optOuts] = await allOrFail([
     db
       .select()
       .from(privacyRequests)

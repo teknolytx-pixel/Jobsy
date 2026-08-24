@@ -691,6 +691,61 @@ check("TC-CRAWL-205 the caller's deadline wins over the crawl's own default",
 
 globalThis.fetch = prev2;
 
+
+// ─────────────────────────────────────────────────────────────
+console.log("\nTWO QUERIES THAT FAIL TOGETHER\n");
+
+const { allOrFail } = await import("../src/lib/allOrFail");
+
+/**
+ * The bug: `Promise.all` adopts the FIRST rejection and abandons the rest. An
+ * abandoned rejection is an unhandled rejection, and a serverless runtime
+ * treats that as a crashed invocation — returning its own bare 503 and throwing
+ * away the careful error response the handler was producing.
+ *
+ * That is exactly what the Candidates screen showed: "The server returned 503"
+ * instead of "your database is a version behind, run the migration". The error
+ * handling was correct and never got to run.
+ *
+ * Two independent queries against one database fail TOGETHER constantly,
+ * because the reasons are shared: a missed migration, a dropped connection, a
+ * suspended compute. So this is the common case, not the edge case.
+ */
+let unhandled: unknown = null;
+const onUnhandled = (reason: unknown) => { unhandled = reason; };
+process.on("unhandledRejection", onUnhandled);
+
+let caught: Error | null = null;
+try {
+  await allOrFail([
+    Promise.reject(new Error("relation sourced_candidates does not exist")),
+    Promise.reject(new Error("relation candidate_sources does not exist")),
+  ]);
+} catch (e) {
+  caught = e as Error;
+}
+// Give the runtime a turn to report anything orphaned.
+await new Promise((r) => setTimeout(r, 50));
+process.off("unhandledRejection", onUnhandled);
+
+check("TC-CRAWL-210 the first failure is thrown for the caller to handle",
+  /sourced_candidates/.test(caught?.message ?? ""), caught?.message ?? "nothing thrown");
+check("TC-CRAWL-211 and the second is NOT left unhandled",
+  unhandled === null, unhandled ? String((unhandled as Error).message) : "none");
+
+const values = await allOrFail([Promise.resolve(1), Promise.resolve("two"), Promise.resolve(true)]);
+check("TC-CRAWL-212 success returns values in order",
+  values[0] === 1 && values[1] === "two" && values[2] === true, JSON.stringify(values));
+
+/** Deterministic: the error reported is the first in ARGUMENT order, not the first to arrive. */
+const slowFirst = allOrFail([
+  new Promise((_, rej) => setTimeout(() => rej(new Error("first")), 30)),
+  Promise.reject(new Error("second")),
+]);
+let which = "";
+try { await slowFirst; } catch (e) { which = (e as Error).message; }
+check("TC-CRAWL-213 and which error surfaces is not a race", which === "first", which);
+
 globalThis.fetch = realFetch;
 console.log(`\n${pass} passed, ${fail} failed  —  crawl\n`);
 process.exit(fail ? 1 : 0);
