@@ -8,6 +8,13 @@ import {
   fetchRobots,
 } from "../crawl";
 import { safeFetch, type SafeFetchDeps } from "../safeFetch";
+import {
+  DEFAULT_GUARDS,
+  PAGE_PARAMS,
+  nextLinkFrom,
+  pagedUrl,
+  type PageGuards,
+} from "./paging";
 import { employerForJob, employerNameFrom } from "../employer";
 import {
   type NormalizedJob,
@@ -305,19 +312,112 @@ function parseSalary(s: string): [number | null, number | null] {
   return [Math.min(...nums), Math.max(...nums)];
 }
 
+/**
+ * Read one feed document into its item blocks.
+ *
+ * `<job>` is the Indeed interchange schema, `<item>` is RSS, `<entry>` is Atom.
+ */
+function feedItems(xml: string): string[] {
+  const jobs = [...xml.matchAll(/<job\b[^>]*>([\s\S]*?)<\/job>/gi)].map((m) => m[1]);
+  if (jobs.length) return jobs;
+  return [...xml.matchAll(/<(?:item|entry)\b[^>]*>([\s\S]*?)<\/(?:item|entry)>/gi)].map((m) => m[1]);
+}
+
+/** A stable-enough identity for a feed item, for detecting a repeated page. */
+const itemKey = (block: string): string =>
+  tag(block, "referencenumber", "requisitionid", "guid", "id") ||
+  `${tag(block, "title")}|${tag(block, "url", "link", "applyurl")}`;
+
+/**
+ * Every page of a job feed.
+ *
+ * ── Why this is more than one fetch ──
+ *
+ * Deloitte's feed reported twenty jobs. Twenty is an RSS page size, not the
+ * size of Deloitte. Feeds paginate two ways: a declared `rel="next"` link,
+ * which is unambiguous, and an undocumented query parameter, which is not.
+ *
+ * Guessing at parameters is dangerous — a server that does not recognise
+ * `?page=2` returns page one with a 200, and a naive loop would request it
+ * until it hit a cap. So a parameter is tried ONCE and kept only if the items
+ * that come back are actually new. One wasted request buys a fact we cannot
+ * otherwise learn, and a wrong guess cannot run away.
+ */
+async function allFeedPages(
+  feedUrl: string,
+  guards: PageGuards = {}
+): Promise<{ blocks: string[]; pages: number; truncated: boolean }> {
+  const g = { ...DEFAULT_GUARDS, ...guards };
+  const seen = new Set<string>();
+  const blocks: string[] = [];
+  let pages = 0;
+
+  const take = (xml: string): number => {
+    let added = 0;
+    for (const b of feedItems(xml)) {
+      const k = itemKey(b);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      blocks.push(b);
+      added++;
+    }
+    return added;
+  };
+
+  const fetchXml = async (url: string): Promise<string> => {
+    const res = await fetch(url, { headers: UA, cache: "no-store" });
+    if (!res.ok) throw new Error(`${new URL(url).hostname} → HTTP ${res.status}`);
+    pages++;
+    return res.text();
+  };
+
+  const first = await fetchXml(feedUrl);
+  const pageSize = take(first);
+  if (!pageSize) return { blocks, pages, truncated: false };
+
+  // ── 1. a declared next link, followed as far as it goes ──
+  let next = nextLinkFrom(first, feedUrl);
+  while (next && pages < g.maxPages && blocks.length < g.maxItems) {
+    if (guards.deadline && Date.now() > guards.deadline) return { blocks, pages, truncated: true };
+    let xml: string;
+    try {
+      xml = await fetchXml(next);
+    } catch {
+      break;
+    }
+    if (take(xml) === 0) break;
+    next = nextLinkFrom(xml, next);
+    if (g.delayMs) await new Promise((r) => setTimeout(r, g.delayMs));
+  }
+  if (pages > 1) return { blocks, pages, truncated: blocks.length >= g.maxItems };
+
+  // ── 2. no next link: probe the common parameters, verifying each ──
+  for (const param of PAGE_PARAMS) {
+    if (guards.deadline && Date.now() > guards.deadline) break;
+    let worked = false;
+    for (let index = 1; pages < g.maxPages && blocks.length < g.maxItems; index++) {
+      let xml: string;
+      try {
+        xml = await fetchXml(pagedUrl(feedUrl, param, pageSize, index));
+      } catch {
+        break;
+      }
+      // Nothing new means the server ignored the parameter — or we reached the
+      // end. Either way this scheme has nothing more to give.
+      if (take(xml) === 0) break;
+      worked = true;
+      if (g.delayMs) await new Promise((r) => setTimeout(r, g.delayMs));
+    }
+    if (worked) break; // a scheme that works is the site's scheme; stop guessing
+  }
+
+  return { blocks, pages, truncated: blocks.length >= g.maxItems };
+}
+
 export async function fetchXmlFeedJobs(feedUrl: string, companyFallback?: string): Promise<NormalizedJob[]> {
-  const res = await fetch(feedUrl, { headers: UA, cache: "no-store" });
-  if (!res.ok) throw new Error(`${new URL(feedUrl).hostname} → HTTP ${res.status}`);
-  const xml = await res.text();
-
-  // <job> is the Indeed schema; <item> is RSS; <entry> is Atom.
-  const blocks =
-    [...xml.matchAll(/<job\b[^>]*>([\s\S]*?)<\/job>/gi)].map((m) => m[1]) ||
-    [];
-  const items = blocks.length
-    ? blocks
-    : [...xml.matchAll(/<(?:item|entry)\b[^>]*>([\s\S]*?)<\/(?:item|entry)>/gi)].map((m) => m[1]);
-
+  const { blocks, pages } = await allFeedPages(feedUrl);
+  if (pages > 1) console.info(`[feed] ${new URL(feedUrl).hostname}: ${blocks.length} jobs across ${pages} pages`);
+  const items = blocks;
   const host = new URL(feedUrl).hostname;
 
   return items.map((block, i): NormalizedJob => {

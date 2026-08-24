@@ -1,4 +1,5 @@
 import { extractSkills, inferSeniority } from "../skills";
+import { pageAll } from "./paging";
 import {
   type NormalizedJob,
   inferEmploymentType,
@@ -77,6 +78,17 @@ export const ATS_SOURCE: Record<AtsKind, JobSource> = {
 };
 
 const UA = { "User-Agent": "Jobsy/1.0 (+job aggregation; contact: hello@jobsy.app)" };
+
+/** Workday refuses more than 20 per request, so this is its number, not ours. */
+const WORKDAY_PAGE = 20;
+/** SmartRecruiters allows 100 and documents `offset`. */
+const SMARTRECRUITERS_PAGE = 100;
+/**
+ * Descriptions are one extra request per job, so they are fetched for the most
+ * recent postings rather than all of them. The rest still import with title,
+ * location and apply URL — a job with a thin description beats no job at all.
+ */
+const DETAIL_BUDGET = 60;
 
 const titleCase = (s: string) =>
   s.replace(/[-_.]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()).trim();
@@ -246,15 +258,34 @@ async function smartrecruiters(companyId: string, company?: string): Promise<Nor
              location?: { city?: string; region?: string; country?: string; remote?: boolean };
              typeOfEmployment?: { label?: string }; department?: { label?: string };
              ref?: string; applyUrl?: string; jobAd?: { sections?: Record<string, { text?: string }> } };
-  const d = await getJson<{ content?: P[] }>(
-    `https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(companyId)}/postings?limit=100`
+  /*
+   * `?limit=100` without `offset` is one page, not the whole board. An employer
+   * with 400 openings imported 100 and looked complete.
+   */
+  const { items } = await pageAll<P>(
+    async (offset, pageSize) => {
+      const d = await getJson<{ content?: P[] }>(
+        `https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(companyId)}` +
+          `/postings?limit=${pageSize}&offset=${offset}`
+      );
+      return d.content ?? [];
+    },
+    (p) => p.id,
+    SMARTRECRUITERS_PAGE
   );
   const name = company || titleCase(companyId);
-  // The list endpoint omits the description; fetch details for the first 40.
+  // The list endpoint omits the description; fetch details for the newest few.
   const out: NormalizedJob[] = [];
-  for (const p of (d.content ?? []).slice(0, 40)) {
+  /*
+   * Every posting is kept; only the DESCRIPTION is budgeted.
+   *
+   * The previous loop iterated `.slice(0, 40)` and dropped posting 41 onward
+   * entirely — a second silent truncation sitting behind the first. A job with
+   * a thin description is still a job somebody can apply for.
+   */
+  for (const [i, p] of items.entries()) {
     let description = "";
-    try {
+    if (i < DETAIL_BUDGET) try {
       const full = await getJson<P>(
         `https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(companyId)}/postings/${p.id}`
       );
@@ -365,16 +396,30 @@ async function workday(token: string, company?: string): Promise<NormalizedJob[]
   const base = `https://${tenant}.${wd}.myworkdayjobs.com`;
   type P = { title: string; externalPath: string; locationsText?: string; postedOn?: string;
              bulletFields?: string[] };
-  const d = await getJson<{ jobPostings?: P[] }>(
-    `${base}/wday/cxs/${tenant}/${site}/jobs`,
-    {
-      method: "POST",
-      headers: { ...UA, "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ appliedFacets: {}, limit: 20, offset: 0, searchText: "" }),
-    }
+
+  /*
+   * Workday's list endpoint caps a page at 20 and expects you to walk `offset`.
+   *
+   * The previous version sent `{ limit: 20, offset: 0 }` once. Accenture, with
+   * thousands of openings, imported twenty — and the number looked like a
+   * plausible answer rather than a page size, which is why it survived so long.
+   */
+  const { items, truncated } = await pageAll<P>(
+    async (offset, pageSize) => {
+      const d = await getJson<{ jobPostings?: P[] }>(`${base}/wday/cxs/${tenant}/${site}/jobs`, {
+        method: "POST",
+        headers: { ...UA, "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ appliedFacets: {}, limit: pageSize, offset, searchText: "" }),
+      });
+      return d.jobPostings ?? [];
+    },
+    (p) => p.externalPath,
+    WORKDAY_PAGE
   );
+  if (truncated) console.warn(`[workday] ${tenant}: stopped on a paging guard at ${items.length} jobs`);
+
   const name = company || titleCase(tenant);
-  return (d.jobPostings ?? []).map((p) =>
+  return items.map((p) =>
     shape("WORKDAY", {
       externalId: p.externalPath,
       url: `${base}/${site}${p.externalPath}`,
