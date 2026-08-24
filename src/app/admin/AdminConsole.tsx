@@ -628,7 +628,11 @@ function CandidatesPanel() {
              suppressed: number; withEmail: number; withPreferredChannel: number };
     owed: number;
     sources: Src[];
-    available: { kind: string; label: string; live: boolean; needs: string | null }[];
+    companies: { id: string; name: string }[];
+    available: {
+      kind: string; label: string; live: boolean; needs: string | null;
+      where: string | null; tokenLabel: string | null;
+    }[];
   };
 
   const [data, setData] = useState<Data | null>(null);
@@ -664,6 +668,51 @@ function CandidatesPanel() {
     }
   };
   useEffect(() => { void load(); }, []);
+
+  /**
+   * Connecting is a form, not a detection.
+   *
+   * Job sources auto-detect because a careers page is public — paste a URL and
+   * the system works out the rest. A candidate source cannot work that way: it
+   * needs a secret API key that belongs to one employer, which nothing can
+   * discover, guess, or generate on their behalf. Somebody with access to that
+   * employer's ATS has to create it and hand it over.
+   *
+   * So the honest interface is a short form that says exactly what it needs and
+   * where to get it, rather than a hopeful "connect" button.
+   */
+  const [form, setForm] = useState({
+    kind: "GREENHOUSE", companyId: "", label: "", token: "", secret: "",
+    lawfulBasis: "APPLICATION",
+  });
+  const [connecting, setConnecting] = useState(false);
+
+  const connect = async () => {
+    setConnecting(true);
+    setMsg(null);
+    try {
+      const r = await fetch("/api/admin/candidates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok) {
+        setMsg(d?.error ?? `Couldn't connect that source (${r.status}).`);
+        return;
+      }
+      setMsg(
+        d.result?.error
+          ? `Connected, but the first pull failed: ${d.result.error}`
+          : `Connected. ${d.result.created} people imported.`
+      );
+      // The secret is deliberately not kept in state after a successful save.
+      setForm((f) => ({ ...f, secret: "", label: "", token: "" }));
+      await load();
+    } finally {
+      setConnecting(false);
+    }
+  };
 
   const sync = async (sourceId: string) => {
     setBusy(sourceId);
@@ -704,6 +753,7 @@ function CandidatesPanel() {
   if (!data) return <div className="emptylist">Loading…</div>;
 
   const s = data.stats;
+  const selected = data.available.find((a) => a.kind === form.kind);
   return (
     <>
       <p style={{ color: "var(--dim)", fontSize: 13.5, margin: "0 0 14px", lineHeight: 1.6 }}>
@@ -772,6 +822,79 @@ function CandidatesPanel() {
           </div>
         ))
       )}
+
+      <h4 style={{ margin: "22px 0 8px", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".9px", color: "var(--dim2)", fontWeight: 800 }}>
+        Connect a source
+      </h4>
+
+      <div className="notice" style={{ marginBottom: 12 }}>
+        This cannot connect itself. A candidate source reads one employer&rsquo;s own applicants
+        using a key that only they can generate — there is no public endpoint to detect, the way
+        there is for a careers page.
+      </div>
+
+      <div className="field">
+        <span>System</span>
+        <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>
+          {data.available.filter((a) => a.live).map((a) => (
+            <option key={a.kind} value={a.kind}>{a.label}</option>
+          ))}
+        </select>
+      </div>
+
+      {selected?.where ? (
+        <div style={{ fontSize: 12.5, color: "var(--dim)", margin: "-4px 0 10px", lineHeight: 1.55 }}>
+          {selected.where}
+        </div>
+      ) : null}
+
+      <div className="field">
+        <span>Employer</span>
+        <select value={form.companyId} onChange={(e) => setForm({ ...form, companyId: e.target.value })}>
+          <option value="">Choose a company…</option>
+          {data.companies.map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="field">
+        <span>Name for this connection</span>
+        <input value={form.label} placeholder="e.g. Acme — Greenhouse"
+          onChange={(e) => setForm({ ...form, label: e.target.value })} />
+      </div>
+
+      {selected?.tokenLabel ? (
+        <div className="field">
+          <span>{selected.tokenLabel}</span>
+          <input value={form.token} onChange={(e) => setForm({ ...form, token: e.target.value })} />
+        </div>
+      ) : null}
+
+      <div className="field">
+        <span>API key</span>
+        {/* type=password so a key is not left readable on a shared screen. */}
+        <input type="password" value={form.secret} autoComplete="off"
+          onChange={(e) => setForm({ ...form, secret: e.target.value })} />
+      </div>
+
+      <div className="field">
+        <span>Why we may hold these people</span>
+        <select value={form.lawfulBasis} onChange={(e) => setForm({ ...form, lawfulBasis: e.target.value })}>
+          <option value="APPLICATION">They applied to this employer</option>
+          <option value="LICENSED">Held under a resume-database licence</option>
+          <option value="LEGITIMATE_INTEREST">Sourcing under legitimate interest</option>
+          <option value="CONSENT">They told us directly</option>
+        </select>
+      </div>
+
+      <button
+        className="primary"
+        disabled={connecting || !form.companyId || !form.label || form.secret.length < 8}
+        onClick={() => void connect()}
+      >
+        {connecting ? "Connecting…" : "Connect and import"}
+      </button>
 
       <h4 style={{ margin: "22px 0 8px", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".9px", color: "var(--dim2)", fontWeight: 800 }}>
         What can be connected

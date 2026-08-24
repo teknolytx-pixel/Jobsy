@@ -2,7 +2,7 @@ import { allOrFail } from "@/lib/allOrFail";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { candidateSources, db } from "@/db";
+import { candidateSources, companies, db } from "@/db";
 import { authErrorResponse, requirePlatformAdmin } from "@/lib/auth";
 import { errorResponse } from "@/lib/apiError";
 import {
@@ -13,6 +13,31 @@ import {
 import { candidateStats, importFromSource, sourceRollup } from "@/lib/candidates/sync";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * Where an employer generates the key, said precisely.
+ *
+ * "Get an API key" is not instructions. Every one of these lives somewhere
+ * specific and slightly buried, and an administrator asking their client for a
+ * credential needs to be able to say exactly where to click.
+ */
+const CREDENTIAL_LOCATION: Record<string, string> = {
+  GREENHOUSE:
+    "In Greenhouse: Configure → Dev Center → API Credential Management → Create New API Key, " +
+    "type Harvest. Grant it the Candidates: GET permissions only.",
+  LEVER:
+    "In Lever: Settings → Integrations and API → API Credentials → Generate New Key. " +
+    "Read-only on opportunities is enough.",
+  ASHBY: "In Ashby: Admin → API Keys → Create API Key, with candidate read access.",
+  WORKABLE:
+    "In Workable: Settings → Integrations → Access tokens → Generate. " +
+    "You also need the account subdomain from your Workable URL.",
+};
+
+/** Kinds that need an account identifier as well as a secret. */
+const TOKEN_LABEL: Record<string, string> = {
+  WORKABLE: "Workable subdomain (the part before .workable.com)",
+};
 export const maxDuration = 120;
 
 /**
@@ -31,7 +56,19 @@ export const maxDuration = 120;
 export async function GET() {
   try {
     await requirePlatformAdmin();
-    const [stats, sources] = await allOrFail([candidateStats(), sourceRollup()]);
+    const [stats, sources, orgs] = await allOrFail([
+      candidateStats(),
+      sourceRollup(),
+      /*
+       * The form needs somewhere to attach a source, and a candidate source is
+       * always ONE employer's credential — never the platform's. Offering the
+       * list here rather than a free-text company id is what stops an
+       * administrator quietly filing another company's applicants under the
+       * wrong employer, which would be a data-protection incident rather than a
+       * typo.
+       */
+      db.select({ id: companies.id, name: companies.name }).from(companies).orderBy(companies.name).limit(500),
+    ]);
 
     return NextResponse.json({
       stats,
@@ -62,6 +99,7 @@ export async function GET() {
         lastError: s.lastError,
         resumable: s.syncCursor > 0,
       })),
+      companies: orgs,
       available: Object.entries(CANDIDATE_KIND_LABEL)
         .filter(([k]) => k !== "MANUAL")
         .map(([kind, label]) => ({
@@ -70,6 +108,10 @@ export async function GET() {
           live: LIVE_CANDIDATE_KINDS.includes(kind as never),
           // For the ones that are not live, say precisely what is missing.
           needs: requirementFor(kind as never),
+          // Where the employer generates the credential, for the ones that work.
+          where: CREDENTIAL_LOCATION[kind] ?? null,
+          // Whether an account identifier is needed alongside the secret.
+          tokenLabel: TOKEN_LABEL[kind] ?? null,
         })),
     });
   } catch (e) {
