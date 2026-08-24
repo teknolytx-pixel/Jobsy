@@ -64,6 +64,13 @@
       "when": 1787520685846,
       "tag": "0008_add_jsonld_crawl",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787569901564,
+      "tag": "0009_crawl_cursor",
+      "breakpoints": true
     }
   ]
 }

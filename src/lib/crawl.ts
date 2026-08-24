@@ -56,7 +56,7 @@ export const PROBE_LIMIT = 4;
  * limiter should be the clock, not an arbitrary count, because the useful
  * number depends entirely on how fast the site answers.
  */
-export const CRAWL_LIMIT = 400;
+export const CRAWL_LIMIT = 5_000;
 
 /**
  * Listing pages expanded per run: the paginated pages of the listing itself,
@@ -68,14 +68,22 @@ export const CRAWL_LIMIT = 400;
 export const LISTING_LIMIT = 30;
 
 /**
- * How long one source may spend crawling.
+ * How long one source may spend crawling, when nobody says otherwise.
  *
- * The route allows 120s and the sync loop reserves headroom for the next
- * source, so stopping ourselves at 75s means a large site degrades into
- * "imported as much as it could this cycle" rather than the function being
- * killed mid-write.
+ * ── This number used to be a lie ──
+ *
+ * It was 75 seconds, chosen against the /api/sources route's 120s ceiling. But
+ * the CRON path — the one that does almost all the work — runs under
+ * /api/ingest, and Vercel Hobby clamps every function to 60 seconds. The whole
+ * ingest run budgets 45s and gives connected sources 55% of it. A crawl that
+ * believed it had 75 seconds would be killed mid-write, every night, and report
+ * nothing.
+ *
+ * So the default is small and the REAL budget is always passed in by the caller
+ * that knows how much time is actually left. A budget invented locally by the
+ * code doing the work is how the first version went wrong.
  */
-export const CRAWL_BUDGET_MS = 75_000;
+export const CRAWL_BUDGET_MS = 20_000;
 /** Floor on politeness, even when robots.txt asks for less. */
 export const MIN_DELAY_MS = 250;
 
@@ -469,6 +477,15 @@ export type DiscoveryResult = {
   via: string[];
   /** Whether the budget ran out before discovery finished. */
   truncated: boolean;
+  /**
+   * Where the next run should resume in the list of expandable listing pages,
+   * and how long that list is.
+   *
+   * Returned rather than inferred, because only this function knows how many
+   * pages it actually got through before the clock stopped it.
+   */
+  nextCursor: number;
+  listingCount: number;
 };
 
 /**
@@ -498,6 +515,8 @@ export async function discoverJobUrls(
 
   const urls = new Set<string>();
   const via: string[] = [];
+  let listingCount = 0;
+  let listingsExpanded = 0;
 
   const outOfTime = () => Boolean(deadline && Date.now() > deadline);
   const allowed = (u: string) => {
@@ -527,13 +546,14 @@ export async function discoverJobUrls(
    * which is precisely the rotation that lets successive runs widen coverage.
    * The wall clock is the real limiter, and it applies to both.
    */
-  const expand = async (pages: string[], label: string) => {
+  const expand = async (pages: string[], label: string, counts = false) => {
     let used = false;
     let spent = 0;
     for (const page of pages) {
       if (urls.size >= limit || spent >= listingLimit || outOfTime()) break;
       if (!allowed(page)) continue;
       spent++;
+      if (counts) listingsExpanded++;
       const res = await safeFetch(page, deps);
       await new Promise((r) => setTimeout(r, rules.delayMs));
       if (!res.ok) continue;
@@ -562,9 +582,10 @@ export async function discoverJobUrls(
     if (urls.size < limit && listings.length) {
       // Rotate, so successive runs walk the catalogue instead of re-reading the
       // same few dozen category pages for ever.
+      listingCount = listings.length;
       const offset = ((opts.rotate ?? 0) % listings.length + listings.length) % listings.length;
       const ordered = [...listings.slice(offset), ...listings.slice(0, offset)];
-      await expand(ordered, "category and location pages from the sitemap");
+      await expand(ordered, "category and location pages from the sitemap", true);
     }
   }
 
@@ -572,6 +593,15 @@ export async function discoverJobUrls(
     urls: [...urls],
     via,
     truncated: urls.size >= limit || outOfTime(),
+    /*
+     * Advance by what we actually expanded, and wrap.
+     *
+     * Wrapping matters: once every category page has been walked the cursor
+     * returns to the start and the site is re-read, which is what keeps
+     * long-lived postings fresh rather than frozen at whatever we saw once.
+     */
+    nextCursor: listingCount ? ((opts.rotate ?? 0) + listingsExpanded) % listingCount : (opts.rotate ?? 0),
+    listingCount,
   };
 }
 

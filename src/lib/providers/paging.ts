@@ -43,9 +43,19 @@ export type PageGuards = {
   delayMs?: number;
 };
 
+/**
+ * Backstops, not budgets.
+ *
+ * These exist so a bug cannot turn into ten thousand requests against an
+ * employer's server. They are deliberately far above any real board — the
+ * largest single ATS account we have seen is under a thousand postings — so
+ * that in practice the loop always ends because the data ran out, never because
+ * a cap was hit. If one of these ever fires it is a signal worth logging, which
+ * is why the adapters do.
+ */
 export const DEFAULT_GUARDS: Required<Omit<PageGuards, "deadline">> = {
-  maxPages: 60,
-  maxItems: 2_000,
+  maxPages: 400,
+  maxItems: 20_000,
   delayMs: 150,
 };
 

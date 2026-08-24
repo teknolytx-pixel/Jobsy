@@ -77,8 +77,15 @@ async function knownUrlsFor(listingUrl: string): Promise<Set<string>> {
 
 /** Fetch every job a connected source currently exposes. */
 export async function fetchSourceJobs(
-  src: Pick<JobSourceRow, "kind" | "token" | "companyName">
-): Promise<{ jobs: NormalizedJob[]; note?: string; employer?: string }> {
+  src: Pick<JobSourceRow, "kind" | "token" | "companyName"> & { crawlCursor?: number },
+  opts: { deadline?: number } = {}
+): Promise<{
+  jobs: NormalizedJob[];
+  note?: string;
+  employer?: string;
+  nextCursor?: number;
+  discovered?: number;
+}> {
   if (isAts(src.kind)) {
     return { jobs: await fetchCompanyJobs(src.kind, src.token, src.companyName) };
   }
@@ -87,16 +94,28 @@ export async function fetchSourceJobs(
   }
   if (src.kind === "JSONLD_CRAWL") {
     const report = await crawlJsonLdReport(src.token, src.companyName, {
-      rotate: crawlRotation(),
+      /*
+       * The STORED cursor, not the clock.
+       *
+       * A clock-derived offset re-read arbitrary parts of a site and could
+       * never promise it had seen all of it. A cursor that persists means each
+       * run continues where the last stopped, so a three-thousand-job employer
+       * is fully covered after enough runs instead of approximately covered for
+       * ever — and once it wraps, the re-read is what keeps postings fresh.
+       */
+      rotate: src.crawlCursor ?? 0,
       known: await knownUrlsFor(src.token),
+      deadline: opts.deadline,
     });
     return {
       jobs: report.jobs,
       employer: report.employer,
+      nextCursor: report.nextCursor,
+      discovered: report.discovered,
       note: report.truncated
-        ? `Found ${report.discovered} job pages and read ${report.opened} within this run's time budget` +
-          `${report.via.length ? ` (via ${report.via.join("; ")})` : ""}. ` +
-          "The next sync continues from a different part of the site."
+        ? `Read ${report.opened} of ${report.discovered} job pages found this run` +
+          `${report.listingCount ? `, section ${report.nextCursor} of ${report.listingCount}` : ""}. ` +
+          "The next sync resumes from here."
         : undefined,
     };
   }
@@ -212,12 +231,18 @@ export type SyncResult = {
 };
 
 /** Pull one connected company and record the outcome on the source row. */
-export async function syncSource(src: JobSourceRow): Promise<SyncResult> {
+export async function syncSource(
+  src: JobSourceRow,
+  opts: { deadline?: number } = {}
+): Promise<SyncResult> {
   const jobSource = jobSourceFor(src.kind);
   const [run] = await db
     .insert(ingestRuns)
     .values({ source: jobSource, board: `${src.companyName} (${src.token})`, sourceId: src.id })
     .returning();
+
+  let nextCursor: number | undefined;
+  let discovered: number | undefined;
 
   const out: SyncResult = {
     sourceId: src.id,
@@ -229,9 +254,11 @@ export async function syncSource(src: JobSourceRow): Promise<SyncResult> {
   };
 
   try {
-    const fetched = await fetchSourceJobs(src);
+    const fetched = await fetchSourceJobs(src, { deadline: opts.deadline });
     out.fetched = fetched.jobs.length;
     out.note = fetched.note;
+    nextCursor = fetched.nextCursor;
+    discovered = fetched.discovered;
 
     /*
      * Repair a name we got wrong.
@@ -267,6 +294,11 @@ export async function syncSource(src: JobSourceRow): Promise<SyncResult> {
     out.error = (e as Error).message;
   }
 
+  /*
+   * Only advance the cursor on a run that actually got somewhere. Advancing it
+   * after a failure would skip a section of the site nobody ever read.
+   */
+  const cursor = out.error ? undefined : nextCursor;
   const failed = Boolean(out.error);
   await db
     .update(jobSources)
@@ -276,6 +308,8 @@ export async function syncSource(src: JobSourceRow): Promise<SyncResult> {
       lastError: out.error ?? null,
       consecutiveFailures: failed ? sql`${jobSources.consecutiveFailures} + 1` : 0,
       totalImported: sql`${jobSources.totalImported} + ${out.created}`,
+      ...(cursor === undefined ? {} : { crawlCursor: cursor }),
+      ...(discovered === undefined ? {} : { lastDiscovered: discovered }),
       // three strikes and we stop hammering a broken endpoint
       status: failed ? (src.consecutiveFailures >= 2 ? "DISABLED" : "FAILING") : "OK",
       enabled: failed && src.consecutiveFailures >= 2 ? false : src.enabled,
@@ -349,7 +383,26 @@ export async function syncAllSources(
       skipped.push({ id: r.id, companyName: r.companyName });
       continue;
     }
-    results.push(await syncSource(r));
+
+    /*
+     * Share the remaining time, rather than letting the first source spend it.
+     *
+     * A crawled careers site will use every second it is given — there is
+     * always another category page. Without a per-source slice, one large
+     * employer would starve every other source on the list, and the sources
+     * behind it would be "deferred" every single night because they are always
+     * behind the same greedy one.
+     *
+     * The slice is generous rather than equal: most sources are an API call and
+     * return in under a second, handing their unused time back to whoever comes
+     * next.
+     */
+    const remainingSources = rows.length - results.length - skipped.length;
+    const perSource = opts.deadline
+      ? Date.now() + Math.max(4_000, Math.floor((opts.deadline - Date.now()) / Math.max(1, remainingSources)))
+      : undefined;
+
+    results.push(await syncSource(r, { deadline: perSource }));
     await new Promise((res) => setTimeout(res, 250)); // be a polite client
   }
 

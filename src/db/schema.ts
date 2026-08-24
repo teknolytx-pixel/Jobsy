@@ -657,6 +657,22 @@ export const jobSources = pgTable(
     lastRunAt: timestamp("last_run_at", { withTimezone: true }),
     lastJobCount: integer("last_job_count").notNull().default(0),
     totalImported: integer("total_imported").notNull().default(0),
+    /**
+     * How far through a large careers site the last run got.
+     *
+     * A serverless run has sixty seconds. An employer can have three thousand
+     * openings. Those two facts cannot both be satisfied in one invocation, and
+     * the first version pretended otherwise by rotating on the clock — which
+     * re-read arbitrary parts of the site and never guaranteed it had seen all
+     * of it.
+     *
+     * A stored cursor makes the guarantee: each run continues where the last
+     * one stopped, so coverage is complete after enough runs rather than
+     * approximately complete for ever.
+     */
+    crawlCursor: integer("crawl_cursor").notNull().default(0),
+    /** Job pages the last run knew existed, so progress can be shown honestly. */
+    lastDiscovered: integer("last_discovered").notNull().default(0),
     consecutiveFailures: integer("consecutive_failures").notNull().default(0),
 
     /** Who connected it — null for sources seeded from env or by an admin script. */

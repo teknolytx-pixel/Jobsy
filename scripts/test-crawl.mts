@@ -624,6 +624,73 @@ check("TC-CRAWL-196 and the run reports the employer it settled on",
 
 globalThis.fetch = before;
 
+
+// ─────────────────────────────────────────────────────────────
+// RESUMING — how a 60-second function reads a 3,000-job employer
+// ─────────────────────────────────────────────────────────────
+console.log("\nRESUMING ACROSS RUNS\n");
+
+/** Four category pages, one job each — a site no single run can finish. */
+const WIDE: Record<string, string> = {
+  "https://wide.com/robots.txt": "User-agent: *\nAllow: /\nSitemap: https://wide.com/sitemap.xml\n",
+  "https://wide.com/careers": `<html><body><div id="root"></div></body></html>`,
+  "https://wide.com/sitemap.xml": `<urlset>${[1, 2, 3, 4]
+    .map((n) => `<url><loc>https://wide.com/jobs/category/area-${n}</loc></url>`)
+    .join("")}</urlset>`,
+};
+for (const n of [1, 2, 3, 4]) {
+  WIDE[`https://wide.com/jobs/category/area-${n}`] =
+    `<html><body><a href="/job/${n}00/role-in-area-${n}">j</a></body></html>`;
+}
+
+const prev2 = globalThis.fetch;
+globalThis.fetch = (async (input: RequestInfo | URL) => {
+  const url = (typeof input === "string" ? input : input.toString()).replace(/\/$/, "");
+  const body = WIDE[url] ?? WIDE[url + "/"];
+  if (body === undefined) return new Response("", { status: 404 });
+  return new Response(body, { status: 200, headers: { "Content-Type": "text/html" } });
+}) as typeof fetch;
+
+const wideRules = parseRobots(WIDE["https://wide.com/robots.txt"]);
+const runFrom = (cursor: number) =>
+  discoverJobUrls("https://wide.com/careers", WIDE["https://wide.com/careers"], wideRules, {
+    listingLimit: 2, rotate: cursor, deps: PUBLIC_DNS,
+  });
+
+const run1 = await runFrom(0);
+const run2 = await runFrom(run1.nextCursor);
+
+check("TC-CRAWL-200 one run reads only what it has budget for",
+  run1.urls.length === 2, `${run1.urls.length}`);
+check("TC-CRAWL-201 and reports where to resume",
+  run1.nextCursor === 2 && run1.listingCount === 4, `cursor ${run1.nextCursor} of ${run1.listingCount}`);
+check("TC-CRAWL-202 the next run continues rather than repeating",
+  run2.urls.join() !== run1.urls.join(), `${run1.urls.join()} then ${run2.urls.join()}`);
+
+const seenAcross = new Set([...run1.urls, ...run2.urls]);
+check("TC-CRAWL-203 and two runs cover the whole site", seenAcross.size === 4, `${seenAcross.size} of 4`);
+
+/**
+ * The cursor WRAPS. Coverage that stopped at the end would freeze a site at
+ * whatever was imported once; wrapping is what makes re-reads — and therefore
+ * daily freshness — happen at all.
+ */
+const run3 = await runFrom(run2.nextCursor);
+check("TC-CRAWL-204 the cursor wraps so the site is re-read, not frozen",
+  run3.nextCursor < run2.nextCursor || run3.nextCursor === 2,
+  `${run2.nextCursor} then ${run3.nextCursor}`);
+
+/** A budget the caller sets is honoured over any the crawl might invent. */
+const { crawlJsonLdReport: rep2 } = await import("../src/lib/providers/universal");
+const tiny = await rep2("https://wide.com/careers", "Wide", {
+  deadline: Date.now() + 1_500,
+  deps: PUBLIC_DNS,
+});
+check("TC-CRAWL-205 the caller's deadline wins over the crawl's own default",
+  Array.isArray(tiny.jobs), `${tiny.jobs.length} jobs, cursor ${tiny.nextCursor}`);
+
+globalThis.fetch = prev2;
+
 globalThis.fetch = realFetch;
 console.log(`\n${pass} passed, ${fail} failed  —  crawl\n`);
 process.exit(fail ? 1 : 0);

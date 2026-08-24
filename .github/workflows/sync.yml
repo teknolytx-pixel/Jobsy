@@ -1,0 +1,88 @@
+# KEEPING THE JOBS FRESH.
+#
+# ── Why this exists instead of a Vercel cron ──
+#
+# The jobs already have a Vercel cron (vercel.json), and it runs once a day.
+# That is not a choice — Vercel's Hobby plan allows one daily cron and clamps
+# every function to 60 seconds. Those two limits together cap the entire
+# ingestion budget at forty-five usable seconds per day, shared across every
+# connected employer and every job board.
+#
+# Forty-five seconds a day cannot keep a large employer current. Citi alone has
+# over three thousand openings; walking them politely takes many minutes of
+# wall-clock time spread over many runs.
+#
+# ── What this does about it ──
+#
+# Calls the same endpoint the Vercel cron calls, every fifteen minutes, from
+# GitHub's runners. Each call does forty-five seconds of work and stores where
+# it stopped, so ~96 runs a day compound into roughly an hour of ingestion —
+# enough to walk every connected source and come back around to re-read the ones
+# already imported.
+#
+# It is the same authenticated endpoint with the same secret. Nothing here has
+# privileges the daily cron doesn't; it simply asks more often.
+#
+# ── Setting it up ──
+#
+# Two repository secrets, under Settings → Secrets and variables → Actions:
+#
+#   JOBSY_URL      https://your-deployment.vercel.app   (no trailing slash)
+#   CRON_SECRET    the same value set in Vercel's environment variables
+#
+# Until both exist this workflow exits without calling anything, so a fork or a
+# fresh clone doesn't fail noisily every quarter hour.
+#
+# If the deployment later moves to a plan with longer functions and more
+# frequent crons, delete this file and raise the schedule in vercel.json — one
+# scheduler is easier to reason about than two.
+
+name: Sync jobs
+
+on:
+  schedule:
+    # Every 15 minutes. GitHub schedules are best-effort and can run late under
+    # load; that is fine here, because each run resumes from a stored cursor
+    # rather than assuming a fixed cadence.
+    - cron: "*/15 * * * *"
+  # So a person can force a sync after connecting a new employer.
+  workflow_dispatch:
+
+# A slow run must never overlap the next one — two concurrent ingests would
+# fight over the same cursors and re-read the same pages.
+concurrency:
+  group: jobsy-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger ingestion
+        env:
+          JOBSY_URL: ${{ secrets.JOBSY_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$JOBSY_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "JOBSY_URL or CRON_SECRET is not set — skipping."
+            echo "Add both under Settings → Secrets and variables → Actions."
+            exit 0
+          fi
+
+          # --fail-with-body so a non-2xx fails the step AND still prints what
+          # the server said. A silent red X teaches nobody anything.
+          curl --silent --show-error --fail-with-body \
+               --max-time 120 \
+               --header "Authorization: Bearer $CRON_SECRET" \
+               "$JOBSY_URL/api/ingest" | tee response.json
+
+          echo ""
+          echo "— summary —"
+          # The endpoint reports which sources it deferred; surfacing it here
+          # means the run log answers "is it keeping up?" without opening the app.
+          python3 -c "import json,sys; d=json.load(open('response.json')); \
+            print('sources synced:', len(d.get('sources', {}).get('results', []))); \
+            print('deferred:', len(d.get('sources', {}).get('skipped', []))); \
+            print('truncated:', d.get('sources', {}).get('truncated'))" 2>/dev/null \
+            || echo "(response was not the expected JSON — see above)"

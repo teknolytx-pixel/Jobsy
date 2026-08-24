@@ -161,8 +161,16 @@ export async function fetchJsonLdJobs(pageUrl: string, companyFallback?: string)
  */
 export type CrawlOpts = {
   limit?: number;
-  /** Wall-clock budget for the whole crawl, in ms. */
+  /** Wall-clock budget for the whole crawl, in ms. Ignored when `deadline` is set. */
   budgetMs?: number;
+  /**
+   * Absolute stop time.
+   *
+   * Preferred over budgetMs, because the caller knows how much of the RUN's
+   * budget is left and this function does not. A crawl that decides its own
+   * deadline is how a 75-second budget ended up inside a 60-second function.
+   */
+  deadline?: number;
   /** Rotates which listing pages get expanded. See discoverJobUrls. */
   rotate?: number;
   /**
@@ -189,6 +197,9 @@ export type CrawlReport = {
   jobs: NormalizedJob[];
   /** The employer this run concluded the site belongs to. */
   employer: string;
+  /** Where the next run should resume, and how much there is to get through. */
+  nextCursor: number;
+  listingCount: number;
   /** Job URLs discovery found, whether or not they were opened. */
   discovered: number;
   /** Pages actually opened this run. */
@@ -204,8 +215,7 @@ export async function crawlJsonLdReport(
   companyFallback?: string,
   opts: CrawlOpts = {}
 ): Promise<CrawlReport> {
-  const started = Date.now();
-  const deadline = started + (opts.budgetMs ?? CRAWL_BUDGET_MS);
+  const deadline = opts.deadline ?? Date.now() + (opts.budgetMs ?? CRAWL_BUDGET_MS);
   const limit = opts.limit ?? CRAWL_LIMIT;
 
   const page = await safeFetch(listingUrl, opts.deps);
@@ -263,6 +273,8 @@ export async function crawlJsonLdReport(
   return {
     jobs: [...deduped.values()],
     employer,
+    nextCursor: found.nextCursor,
+    listingCount: found.listingCount,
     discovered: found.urls.length,
     opened: pages.length,
     truncated: found.truncated || pages.length < ordered.length,
