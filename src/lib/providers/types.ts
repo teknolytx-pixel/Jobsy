@@ -40,7 +40,20 @@ export interface JobProvider {
    * ATS providers stay synchronous — their boards are a config list.
    */
   boards(): string[] | Promise<string[]>;
-  fetchBoard(board: string): Promise<NormalizedJob[]>;
+  /**
+   * `pages` asks a query-based provider for more than its default first page.
+   *
+   * Optional and defaulted, so the demand-driven path is untouched: those
+   * queries are broad ("senior react engineer") and one page of the freshest
+   * results is the right shape. Following ONE employer is the opposite — the
+   * whole point is everything they have posted — and a single page returns
+   * about ten jobs, which for Infosys looks like a broken feature rather than a
+   * first page.
+   *
+   * It costs quota. On JSearch each page is billed as a request, so this is
+   * spent where it buys coverage and nowhere else.
+   */
+  fetchBoard(board: string, opts?: { pages?: number }): Promise<NormalizedJob[]>;
 }
 
 export class ProviderNotAvailableError extends Error {

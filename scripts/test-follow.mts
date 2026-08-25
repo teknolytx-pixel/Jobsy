@@ -69,5 +69,41 @@ check("TC-FOL-22 ATS providers are not asked to answer a name query",
   !(QUERY_SOURCES as readonly string[]).some((s) => ["GREENHOUSE", "LEVER", "ASHBY"].includes(s)),
   QUERY_SOURCES.join(","));
 
+// ─────────────────────────────────────────────────────────────
+console.log("\nHOW MUCH OF AN EMPLOYER WE ASK FOR\n");
+
+const { EMPLOYER_PAGES } = await import("../src/lib/followedEmployers");
+const { jsearchProvider } = await import("../src/lib/providers/aggregators");
+
+/**
+ * One page is about ten jobs. For a company the size of Infosys that reads as a
+ * broken feature rather than a first page — which is exactly how this shipped
+ * before the number was made a parameter.
+ */
+check("TC-FOL-30 following asks for more than one page", EMPLOYER_PAGES >= 2, `${EMPLOYER_PAGES}`);
+check("TC-FOL-31 but not an unbounded number", EMPLOYER_PAGES <= 5, `${EMPLOYER_PAGES}`);
+
+let asked = "";
+const priorFetch = globalThis.fetch;
+globalThis.fetch = (async (input: RequestInfo | URL) => {
+  asked = typeof input === "string" ? input : input.toString();
+  return new Response(JSON.stringify({ data: { jobs: [] } }), { status: 200 });
+}) as typeof fetch;
+
+process.env.RAPIDAPI_KEY ||= "test-key-for-url-shape";
+await jsearchProvider.fetchBoard("Infosys", { pages: 3 }).catch(() => {});
+check("TC-FOL-32 the page count reaches the request", /num_pages=3/.test(asked),
+  asked.replace(/^.*jsearch/, "jsearch").slice(0, 90));
+
+await jsearchProvider.fetchBoard("senior react engineer").catch(() => {});
+check("TC-FOL-33 and the demand queries are unchanged at one page",
+  /num_pages=1/.test(asked), asked.replace(/^.*jsearch/, "jsearch").slice(0, 90));
+
+await jsearchProvider.fetchBoard("Infosys", { pages: 99 }).catch(() => {});
+check("TC-FOL-34 an absurd request is capped, not obeyed",
+  /num_pages=5/.test(asked), asked.replace(/^.*jsearch/, "jsearch").slice(0, 90));
+
+globalThis.fetch = priorFetch;
+
 console.log(`\n${pass} passed, ${fail} failed  —  followed employers\n`);
 process.exit(fail ? 1 : 0);

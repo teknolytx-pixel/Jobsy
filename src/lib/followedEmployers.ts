@@ -39,6 +39,16 @@ import { upsertJob } from "./ingest";
  */
 
 /**
+ * Pages requested per employer, per board.
+ *
+ * Three is a deliberate compromise: roughly thirty results, enough that a large
+ * employer looks followed rather than sampled, while staying cheap enough that
+ * a handful of employers on a daily schedule sits inside a small JSearch quota.
+ * Each page is billed as a request, so this number is the main lever on cost.
+ */
+export const EMPLOYER_PAGES = 3;
+
+/**
  * The providers that answer a free-text query.
  *
  * The ATS providers take a board slug — "stripe", "acme|wd5|Careers" — and
@@ -130,7 +140,15 @@ export async function syncFollowedEmployer(
   for (const p of providers) {
     if (opts.deadline && Date.now() > opts.deadline) break;
     try {
-      const jobs = await p.fetchBoard(row.name);
+      /*
+       * More than one page, unlike the demand-driven queries.
+       *
+       * Those are broad and want the freshest results; this is one employer and
+       * wants everything they have posted. One page is about ten jobs, which
+       * for a company the size of Infosys reads as a broken feature rather than
+       * a first page.
+       */
+      const jobs = await p.fetchBoard(row.name, { pages: EMPLOYER_PAGES });
       out.fetched += jobs.length;
       out.providers.push(p.label);
       collected.push(...jobs.filter((j) => isSameEmployer(row.name, j.companyName)));

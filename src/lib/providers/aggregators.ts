@@ -105,14 +105,17 @@ export const jsearchProvider: JobProvider = {
   // SRC-014 — phrases follow live candidate demand, not a constant.
   boards: () => demandQueries("PHRASE", JSEARCH_QUERIES, queriesPerRun(env.jobs.jsearchMonthlyBudget)),
 
-  async fetchBoard(query: string): Promise<NormalizedJob[]> {
+  async fetchBoard(query: string, opts: { pages?: number } = {}): Promise<NormalizedJob[]> {
     // v5 of this API renamed /search to /search-v2 and moved the results from
     // `data` (an array) to `data.jobs`. Both changes shipped without a version
     // bump on the host, so the old path simply started returning
     // {"message":"Endpoint '/search' does not exist"} — a 404 that reads like a
     // network fault rather than a contract change. Hence the explicit check on
     // the envelope below: a silent zero is worse than a loud failure.
-    const url = `https://jsearch.p.rapidapi.com/search-v2?query=${encodeURIComponent(query)}&page=1&num_pages=1&date_posted=month`;
+    // Capped at 5. JSearch bills each page as a request, and beyond five the
+    // results for a single employer are mostly reposts of the first fifty.
+    const pages = Math.min(Math.max(opts.pages ?? 1, 1), 5);
+    const url = `https://jsearch.p.rapidapi.com/search-v2?query=${encodeURIComponent(query)}&page=1&num_pages=${pages}&date_posted=month`;
     const res = await fetch(url, {
       headers: {
         "X-RapidAPI-Key": env.jobs.rapidApiKey!,
