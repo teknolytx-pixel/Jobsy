@@ -746,6 +746,104 @@ let which = "";
 try { await slowFirst; } catch (e) { which = (e as Error).message; }
 check("TC-CRAWL-213 and which error surfaces is not a race", which === "first", which);
 
+
+// ─────────────────────────────────────────────────────────────
+// JOBS THAT LIVE IN THE PAGE'S JAVASCRIPT STATE
+//
+// "The jobs only exist inside a JavaScript app" was true of the rendering and
+// false about the data. A client-rendered careers site still has to get its
+// first screenful into the browser, and ships it in the HTML.
+// ─────────────────────────────────────────────────────────────
+console.log("\nJOBS IN PAGE DATA\n");
+
+const { jobsFromEmbeddedJson, looksLikeJobArray, embeddedJsonBlobs } =
+  await import("../src/lib/providers/embedded");
+
+const SPA_JOBS = [
+  { jobId: "R-1001", jobTitle: "Senior Data Engineer", primaryLocation: { name: "Austin, TX" },
+    jobDescription: "<p>Python, PySpark and Airflow on AWS.</p>", detailUrl: "/jobs/R-1001" },
+  { jobId: "R-1002", jobTitle: "Machine Learning Engineer", primaryLocation: { name: "Remote - US" },
+    jobDescription: "<p>PyTorch and MLOps.</p>", detailUrl: "/jobs/R-1002" },
+  { jobId: "R-1003", jobTitle: "Frontend Engineer", primaryLocation: { name: "Dallas, TX" },
+    jobDescription: "<p>React and TypeScript.</p>", detailUrl: "/jobs/R-1003" },
+];
+
+const NEXT_PAGE = `<!doctype html><html><head><title>Careers</title></head><body>
+  <div id="__next"></div>
+  <script id="__NEXT_DATA__" type="application/json">${JSON.stringify({
+    props: { pageProps: { nav: [{ title: "Home", href: "/" }], searchResults: { jobs: SPA_JOBS } } },
+  })}</script></body></html>`;
+
+const fromNext = jobsFromEmbeddedJson(NEXT_PAGE, "https://digitalcareers.example.com/global");
+check("TC-CRAWL-220 jobs are read out of __NEXT_DATA__", fromNext.length === 3, `${fromNext.length}`);
+check("TC-CRAWL-221 titles survive nested key spellings",
+  fromNext[0]?.title === "Senior Data Engineer", fromNext[0]?.title);
+check("TC-CRAWL-222 so do nested locations",
+  fromNext[0]?.location === "Austin, TX", fromNext[0]?.location);
+check("TC-CRAWL-223 relative links are made absolute",
+  fromNext[0]?.applyUrl === "https://digitalcareers.example.com/jobs/R-1001", fromNext[0]?.applyUrl);
+check("TC-CRAWL-224 skills are extracted from the description",
+  fromNext[0]?.skills.includes("PySpark"), fromNext[0]?.skills.join(","));
+check("TC-CRAWL-225 remote is inferred", fromNext[1]?.remote === "REMOTE", fromNext[1]?.remote);
+
+/** A Redux-style assignment, with braces inside strings to break a naive regex. */
+const REDUX_PAGE = `<html><body><script>
+  window.__INITIAL_STATE__ = ${JSON.stringify({
+    ui: { banner: "Braces } inside { a string" },
+    results: { positions: SPA_JOBS },
+  })};
+</script></body></html>`;
+const fromRedux = jobsFromEmbeddedJson(REDUX_PAGE, "https://spa.example.com/careers");
+check("TC-CRAWL-226 and out of a window assignment", fromRedux.length === 3, `${fromRedux.length}`);
+check("TC-CRAWL-227 braces inside strings do not truncate the blob",
+  embeddedJsonBlobs(REDUX_PAGE).length === 1, `${embeddedJsonBlobs(REDUX_PAGE).length} blobs`);
+
+/**
+ * The restraint that matters. A state blob is mostly navigation, flags and
+ * translations; guessing wrong imports "Privacy Policy" as a vacancy.
+ */
+check("TC-CRAWL-230 a nav menu is not a job list",
+  !looksLikeJobArray([{ title: "Home", href: "/" }, { title: "About", href: "/about" }]),
+  "nav rejected");
+check("TC-CRAWL-231 a list of bare strings is not a job list",
+  !looksLikeJobArray(["Engineering", "Sales", "Design"]));
+check("TC-CRAWL-232 one entry is not a list", !looksLikeJobArray([SPA_JOBS[0]]));
+check("TC-CRAWL-233 titles alone are not enough",
+  !looksLikeJobArray([{ title: "One" }, { title: "Two" }, { title: "Three" }]));
+check("TC-CRAWL-234 but a title plus a place is",
+  looksLikeJobArray([{ title: "One", city: "Austin" }, { title: "Two", city: "Dallas" }]));
+
+const NOTHING = `<html><body><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({
+  props: { pageProps: { menu: [{ title: "Home", href: "/" }, { title: "News", href: "/news" }] } },
+})}</script></body></html>`;
+check("TC-CRAWL-235 a page with no jobs yields none",
+  jobsFromEmbeddedJson(NOTHING, "https://x.example.com/careers").length === 0);
+
+/** Detection reports it honestly, and the ingest path reads the same data. */
+const SPA_SITE: Record<string, string> = {
+  "https://spajobs.example.com/robots.txt": "User-agent: *\nAllow: /\n",
+  "https://spajobs.example.com/careers": NEXT_PAGE,
+};
+const beforeSpa = globalThis.fetch;
+globalThis.fetch = (async (input: RequestInfo | URL) => {
+  const url = (typeof input === "string" ? input : input.toString()).replace(/\/$/, "");
+  const body = SPA_SITE[url] ?? SPA_SITE[url + "/"];
+  if (body === undefined) return new Response("", { status: 404 });
+  return new Response(body, { status: 200, headers: { "Content-Type": "text/html" } });
+}) as typeof fetch;
+
+const spaDetect = await detectSource("https://spajobs.example.com/careers", PUBLIC_DNS);
+check("TC-CRAWL-240 a client-rendered site is no longer a dead end",
+  spaDetect.kind === "JSONLD", spaDetect.kind ?? spaDetect.reason.slice(0, 70));
+check("TC-CRAWL-241 and the explanation says where the jobs were found",
+  spaDetect.kind !== null && /page data/i.test(spaDetect.via), spaDetect.kind ? spaDetect.via.slice(0, 80) : "—");
+
+const { fetchJsonLdJobs: fetchLd } = await import("../src/lib/providers/universal");
+const spaJobs = await fetchLd("https://spajobs.example.com/careers", "SPA Jobs");
+check("TC-CRAWL-242 and the importer pulls them", spaJobs.length === 3, `${spaJobs.length}`);
+
+globalThis.fetch = beforeSpa;
+
 globalThis.fetch = realFetch;
 console.log(`\n${pass} passed, ${fail} failed  —  crawl\n`);
 process.exit(fail ? 1 : 0);

@@ -4,6 +4,7 @@ import { ATS_LABEL } from "./providers/ats";
 import { recogniseVendor } from "./vendors";
 import { PROBE_LIMIT, fetchJobPages, fetchRobots, findJobPages, robotsAllows } from "./crawl";
 import { employerNameFrom } from "./employer";
+import { jobsFromEmbeddedJson } from "./providers/embedded";
 
 /**
  * CAREERS-URL AUTO-DETECTION.
@@ -303,7 +304,28 @@ export async function detectSource(
     }
   }
 
-  // ── 5 + 6. the jobs themselves carry the structured data ──
+  /*
+   * ── 5. the page's own JavaScript state ──
+   *
+   * Checked BEFORE crawling, because it costs nothing: the HTML is already in
+   * hand. A site that renders its jobs client-side has almost always shipped
+   * the first page of them in a __NEXT_DATA__ or __INITIAL_STATE__ blob, and
+   * reporting "the jobs only exist inside a JavaScript app" while holding that
+   * blob in a string is a failure of effort, not of possibility.
+   */
+  const embedded = jobsFromEmbeddedJson(html, fetched.finalUrl, siteNameFrom(html) ?? domainName);
+  if (embedded.length >= 2) {
+    return {
+      kind: "JSONLD",
+      token: fetched.finalUrl,
+      companyName: (siteNameFrom(html) ?? domainName).slice(0, 80),
+      label: "Career site (page data)",
+      confidence: "likely",
+      via: `The page renders its jobs in the browser, but ships ${embedded.length} of them in the HTML as page data — that is what Jobsy reads.`,
+    };
+  }
+
+  // ── 6 + 7. the jobs themselves carry the structured data ──
   //
   // Found by following links, or through the sitemap when the listing is
   // rendered client-side and links to nothing. Only a handful of pages are

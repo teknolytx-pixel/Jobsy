@@ -8,6 +8,7 @@ import {
   fetchRobots,
 } from "../crawl";
 import { safeFetch, type SafeFetchDeps } from "../safeFetch";
+import { jobsFromEmbeddedJson } from "./embedded";
 import {
   DEFAULT_GUARDS,
   PAGE_PARAMS,
@@ -136,7 +137,16 @@ export async function fetchJsonLdJobs(pageUrl: string, companyFallback?: string)
   const res = await fetch(pageUrl, { headers: UA, redirect: "follow", cache: "no-store" });
   if (!res.ok) throw new Error(`${new URL(pageUrl).hostname} → HTTP ${res.status}`);
   const html = (await res.text()).slice(0, 900_000);
-  return jsonLdJobsFromHtml(html, pageUrl, companyFallback);
+
+  const structured = jsonLdJobsFromHtml(html, pageUrl, companyFallback);
+  if (structured.length) return structured;
+
+  /*
+   * No schema.org data — but a JavaScript careers site still has to get its
+   * first screenful of jobs into the browser, and almost always ships them in
+   * the HTML as serialised framework state. Same document, parsed harder.
+   */
+  return jobsFromEmbeddedJson(html, pageUrl, companyFallback);
 }
 
 /**
@@ -263,6 +273,7 @@ export async function crawlJsonLdReport(
 
   // The listing page itself sometimes carries records too. Free to check.
   const jobs = jsonLdJobsFromHtml(page.body, page.finalUrl, employer);
+  if (!jobs.length) jobs.push(...jobsFromEmbeddedJson(page.body, page.finalUrl, employer));
   for (const p of pages) {
     jobs.push(...jsonLdJobsFromHtml(p.html, p.url, employer));
   }
