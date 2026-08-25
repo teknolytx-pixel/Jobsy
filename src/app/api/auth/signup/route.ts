@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { db, users, termsAcceptances, notificationPrefs } from "@/db";
+import { db, users, termsAcceptances, notificationPrefs, companies, companyMembers } from "@/db";
 import { createSession, hashPassword, setSessionCookie } from "@/lib/auth";
 import { clientIp, consume, tooMany } from "@/lib/ratelimit";
 import { audit } from "@/lib/audit";
@@ -14,7 +14,17 @@ import { deliverAedtNotice } from "@/lib/compliance/aedt";
 const Body = z.object({
   email: z.string().email(),
   password: z.string().min(8, "Password must be at least 8 characters"),
-  name: z.string().min(2, "Please enter your name"),
+  /**
+   * Asked as two fields, stored as three.
+   *
+   * `name` stays the display string every existing screen already reads, and is
+   * derived here rather than asked for twice. Splitting a full name reliably is
+   * not possible — "Maria del Carmen Ortiz Gómez" has no safe midpoint — so the
+   * parts are collected at the only moment somebody can tell us which is which.
+   */
+  firstName: z.string().min(1, "Please enter your first name").max(120),
+  lastName: z.string().min(1, "Please enter your last name").max(120),
+  phone: z.string().max(60).optional(),
   /**
    * CAN-001 / REC-001 — chosen once, at signup, and only ever one of two.
    * BOTH is gone: it existed only as the side effect of a candidate posting a
@@ -23,6 +33,33 @@ const Body = z.object({
    */
   role: z.enum(["CANDIDATE", "RECRUITER"]).default("CANDIDATE"),
   location: z.string().max(200).optional(),
+
+  // ── candidate ──
+  /** Primary skills, so the first deck is relevant instead of random. */
+  /*
+   * No min(1) on the entries. A comma-separated field trivially produces a
+   * trailing empty string, and rejecting the whole registration over it would
+   * be an absurd way to lose a candidate. They are trimmed and dropped below,
+   * where the cleanup belongs.
+   */
+  skills: z.array(z.string().max(60)).max(40).optional(),
+  /**
+   * "Will you now or in the future require sponsorship for employment visa
+   * status?" — the standard, EEO-safe form of this question.
+   *
+   * It asks about SPONSORSHIP, which is a fact about the job, and never about
+   * citizenship, national origin or immigration status, which are protected and
+   * which IRCA forbids screening on. The matching engine already reads this
+   * field to avoid showing people roles that cannot hire them — a filter that
+   * helps the candidate rather than excluding them.
+   */
+  requiresSponsorship: z.boolean().optional(),
+
+  // ── recruiter ──
+  /** Optional at registration; a recruiter can post before naming a company. */
+  companyName: z.string().max(160).optional(),
+  /** Whether this person administers the company account or just recruits. */
+  companyAdmin: z.boolean().optional(),
   /**
    * LEGAL-009 — clickwrap. The UI presents a separate checkbox directly above
    * the Create Account button with matching button text. This field is the
@@ -50,7 +87,11 @@ export async function POST(req: Request) {
       { status: 400 }
     );
   }
-  const { email, password, name, role, location } = parsed.data;
+  const {
+    email, password, firstName, lastName, phone, role, location,
+    skills, requiresSponsorship, companyName, companyAdmin,
+  } = parsed.data;
+  const name = `${firstName.trim()} ${lastName.trim()}`.trim();
   const lower = email.toLowerCase().trim();
 
   const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, lower)).limit(1);
@@ -62,10 +103,20 @@ export async function POST(req: Request) {
     .insert(users)
     .values({
       email: lower,
-      name: name.trim(),
+      name,
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      phone: phone?.trim() || null,
       passwordHash: await hashPassword(password),
       role,
       location: location?.trim() || null,
+      /*
+       * Only ever set from what THIS person told us about themselves, and only
+       * for a candidate. A recruiter's answer would be meaningless and a
+       * recruiter's account must never carry a field the matcher reads.
+       */
+      skills: role === "CANDIDATE" ? (skills ?? []).map((v) => v.trim()).filter(Boolean).slice(0, 40) : [],
+      requiresSponsorship: role === "CANDIDATE" ? requiresSponsorship ?? null : null,
       // Used ONLY to select which legal notices apply. Never a matching input.
       jurisdiction: stateOf(location) ?? null,
     })
@@ -98,6 +149,44 @@ export async function POST(req: Request) {
     unsubscribeTokenHash: hashToken(newToken()),
   });
 
+  /*
+   * REC-002 — a recruiter who named a company gets one, and administers it.
+   *
+   * Created here rather than in a later step because the ask is that a
+   * recruiter can post the moment they register. A company is optional: an
+   * independent recruiter posts perfectly well without one, and inventing a
+   * shell company for them would put a meaningless employer name on every job
+   * they publish.
+   */
+  if (role === "RECRUITER" && companyName?.trim()) {
+    const slug =
+      companyName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) ||
+      `company-${user.id.slice(0, 8)}`;
+    const [company] = await db
+      .insert(companies)
+      .values({ name: companyName.trim().slice(0, 160), slug, source: "JOBSY" })
+      .onConflictDoNothing({ target: companies.slug })
+      .returning();
+
+    const attached =
+      company ??
+      (await db.select().from(companies).where(eq(companies.slug, slug)).limit(1))[0];
+
+    if (attached) {
+      await db.update(users).set({ companyId: attached.id }).where(eq(users.id, user.id));
+      await db
+        .insert(companyMembers)
+        .values({
+          companyId: attached.id,
+          userId: user.id,
+          // Someone registering a company IS its first administrator; there is
+          // nobody else to grant it.
+          seatRole: companyAdmin === false ? "RECRUITER" : "COMPANY_ADMIN",
+        })
+        .onConflictDoNothing();
+    }
+  }
+
   // XPLAIN-002 — the AEDT notice is delivered at signup, before any automated
   // assessment runs. In NYC it also starts the 10-business-day clock.
   await deliverAedtNotice(user.id, user.jurisdiction);
@@ -128,6 +217,8 @@ export async function POST(req: Request) {
       ok: true,
       userId: user.id,
       role: user.role,
+      /** Where the client should go next. A recruiter can post immediately. */
+      next: role === "RECRUITER" ? "/jobs" : "/onboarding",
       profileReady: false,
       emailVerified: false,
       message: "Check your email to verify your address.",

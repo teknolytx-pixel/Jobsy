@@ -350,6 +350,12 @@ svg{stroke:currentColor}
 
 .notice{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:13px;color:var(--dim);line-height:1.5}
 
+/* Two fields side by side — first/last name, a yes/no pair. Collapses on
+   narrow screens, because two half-width inputs on a phone are two unusable
+   inputs. */
+.tworow{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:end}
+.tworow .field{margin-top:12px}
+
 /* ═══════════════════════════════════════════════════════════════
    RESPONSIVE
 
@@ -457,4 +463,8 @@ svg{stroke:currentColor}
 @media (max-width:420px){
   .statgrid{grid-template-columns:repeat(2,1fr)}
   .srcrow{flex-direction:column;align-items:stretch}
+}
+
+@media (max-width:420px){
+  .tworow{grid-template-columns:1fr;gap:0}
 }

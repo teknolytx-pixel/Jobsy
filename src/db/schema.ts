@@ -329,6 +329,20 @@ export const users = pgTable(
     emailVerified: boolean("email_verified").notNull().default(false),
 
     // candidate side
+    /**
+     * Given and family name, kept separately from `name`.
+     *
+     * `name` remains the display string and stays authoritative for everything
+     * that renders a person, so nothing downstream has to learn a new field.
+     * These exist because registration asks for them separately and an
+     * application form, an offer letter or a CV parse needs the parts — joining
+     * them is easy, splitting them reliably is not ("Maria del Carmen Ortiz
+     * Gómez" has no safe midpoint).
+     */
+    firstName: varchar("first_name", { length: 120 }),
+    lastName: varchar("last_name", { length: 120 }),
+    /** Contact number. Optional for candidates, useful for recruiters. */
+    phone: varchar("phone", { length: 60 }),
     headline: text("headline"),
     bio: text("bio"),
     location: text("location"),

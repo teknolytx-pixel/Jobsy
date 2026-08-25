@@ -58,6 +58,25 @@ export default function LoginForm({
   const [role, setRole] = useState<"CANDIDATE" | "RECRUITER" | null>(
     roleParam === "CANDIDATE" || roleParam === "RECRUITER" ? roleParam : null
   );
+
+  /**
+   * Registration asks for what the product needs on day one, and nothing else.
+   *
+   * A candidate whose skills and sponsorship answer are known at signup gets a
+   * first deck that is actually about them. Ask for those later and the first
+   * thing they ever see is a pile of irrelevant jobs — the impression that
+   * matters most, formed by the data we chose not to collect.
+   *
+   * Everything else still lives in onboarding, which stays optional.
+   */
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [skills, setSkills] = useState("");
+  const [sponsorship, setSponsorship] = useState<boolean | null>(null);
+  const [cv, setCv] = useState<File | null>(null);
+  const [companyName, setCompanyName] = useState("");
+  const [companyAdmin, setCompanyAdmin] = useState(true);
   const [err, setErr] = useState<string | null>(params.get("error"));
   const [notice, setNotice] = useState<string | null>(
     params.get("verified") ? "Your email is verified — welcome to Jobsy." : null
@@ -81,7 +100,23 @@ export default function LoginForm({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
-          signup ? { email, password, name, role, acceptedTerms: true } : { email, password }
+          signup
+            ? {
+                email,
+                password,
+                firstName,
+                lastName,
+                phone: phone || undefined,
+                role,
+                acceptedTerms: true,
+                ...(role === "CANDIDATE"
+                  ? {
+                      skills: skills.split(",").map((v) => v.trim()).filter(Boolean),
+                      ...(sponsorship === null ? {} : { requiresSponsorship: sponsorship }),
+                    }
+                  : { companyName: companyName || undefined, companyAdmin }),
+              }
+            : { email, password }
         ),
       });
       const data = await res.json();
@@ -90,9 +125,31 @@ export default function LoginForm({
         return;
       }
       if (signup) {
+        /*
+         * The CV goes up AFTER the account exists, because uploading needs a
+         * session and the account is what creates one. Two requests, one
+         * screen — and a failed upload must never lose the account that was
+         * just created successfully, so it is reported rather than thrown.
+         */
+        if (cv && role === "CANDIDATE") {
+          try {
+            const fd = new FormData();
+            fd.append("file", cv);
+            const up = await fetch("/api/resumes", { method: "POST", body: fd });
+            if (!up.ok) {
+              setNotice(
+                "Account created, but your CV didn't upload. You can add it from your profile."
+              );
+            }
+          } catch {
+            setNotice("Account created, but your CV didn't upload. You can add it from your profile.");
+          }
+        }
         // AUTH-006 — say what happens next, rather than letting the first
         // "verify your email" wall come as a surprise.
-        setNotice("Check your inbox — we've sent you a link to verify your email address.");
+        setNotice((n) =>
+          n ?? "Check your inbox — we've sent you a link to verify your email address."
+        );
       }
       /**
        * ORG-002 — return the person to where they were going.
@@ -108,7 +165,14 @@ export default function LoginForm({
        */
       const raw = params.get("next");
       const next = raw && raw.startsWith("/") && !raw.startsWith("//") ? raw : null;
-      router.push(!data.profileReady ? "/onboarding" : (next ?? "/swipe"));
+      /*
+       * A recruiter who just registered can post immediately, so send them to
+       * the posting screen rather than a candidate onboarding flow that has
+       * nothing to ask them. The server decides this and returns it as `next`,
+       * because the server is what knows whether a company was attached.
+       */
+      const afterSignup = typeof data.next === "string" ? data.next : "/onboarding";
+      router.push(signup ? (next ?? afterSignup) : (!data.profileReady ? "/onboarding" : (next ?? "/swipe")));
       router.refresh();
     } catch {
       setErr("Network error — is the server running?");
@@ -220,15 +284,18 @@ export default function LoginForm({
             </div>
           ) : null}
           {signup ? (
-            <label className="field">
-              <span>Full name</span>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-                autoComplete="name"
-              />
-            </label>
+            <div className="tworow">
+              <label className="field">
+                <span>First name</span>
+                <input value={firstName} onChange={(e) => setFirstName(e.target.value)}
+                  required autoComplete="given-name" />
+              </label>
+              <label className="field">
+                <span>Last name</span>
+                <input value={lastName} onChange={(e) => setLastName(e.target.value)}
+                  required autoComplete="family-name" />
+              </label>
+            </div>
           ) : null}
           <label className="field">
             <span>Email</span>
@@ -254,6 +321,123 @@ export default function LoginForm({
               <small style={{ color: "var(--dim)", fontSize: 12 }}>At least 8 characters.</small>
             ) : null}
           </label>
+
+          {signup ? (
+            <label className="field">
+              <span>Phone {role === "CANDIDATE" ? "(optional)" : ""}</span>
+              <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)}
+                autoComplete="tel" placeholder="+1 555 000 0000" />
+            </label>
+          ) : null}
+
+          {signup && role === "CANDIDATE" ? (
+            <>
+              <label className="field">
+                <span>Primary skills</span>
+                <input
+                  value={skills}
+                  onChange={(e) => setSkills(e.target.value)}
+                  placeholder="Python, PySpark, Machine Learning"
+                />
+                <small style={{ color: "var(--dim)", fontSize: 12 }}>
+                  Separate with commas. These decide the very first jobs you see, so the ones you
+                  actually want to be hired for matter most.
+                </small>
+              </label>
+
+              {/*
+                * The standard, EEO-safe form of this question. It asks about
+                * SPONSORSHIP — a fact about the job — and never about
+                * citizenship or immigration status, which are protected. Jobsy
+                * uses it to stop showing roles that cannot hire you.
+                */}
+              <div className="field">
+                <span>Will you need visa sponsorship to work in the US, now or in future?</span>
+                <div className="tworow" style={{ marginTop: 6 }}>
+                  {[
+                    ["Yes", true],
+                    ["No", false],
+                  ].map(([label, value]) => (
+                    <button
+                      key={String(label)}
+                      type="button"
+                      className={`btn ghost${sponsorship === value ? " on" : ""}`}
+                      style={{
+                        marginTop: 0,
+                        background: sponsorship === value ? "var(--brand)" : undefined,
+                        color: sponsorship === value ? "#fff" : undefined,
+                      }}
+                      aria-pressed={sponsorship === value}
+                      onClick={() => setSponsorship(value as boolean)}
+                    >
+                      {label as string}
+                    </button>
+                  ))}
+                </div>
+                <small style={{ color: "var(--dim)", fontSize: 12 }}>
+                  Used only to hide roles that can&rsquo;t sponsor. Never shown as a filter to
+                  recruiters browsing people.
+                </small>
+              </div>
+
+              <label className="field">
+                <span>CV (optional)</span>
+                <input
+                  type="file"
+                  accept=".pdf,.doc,.docx,.txt,.rtf"
+                  onChange={(e) => setCv(e.target.files?.[0] ?? null)}
+                />
+                <small style={{ color: "var(--dim)", fontSize: 12 }}>
+                  We read it to fill in your skills. You can add or replace it later.
+                </small>
+              </label>
+            </>
+          ) : null}
+
+          {signup && role === "RECRUITER" ? (
+            <>
+              <label className="field">
+                <span>Company (optional)</span>
+                <input
+                  value={companyName}
+                  onChange={(e) => setCompanyName(e.target.value)}
+                  placeholder="Acme Industrial"
+                  autoComplete="organization"
+                />
+                <small style={{ color: "var(--dim)", fontSize: 12 }}>
+                  Leave blank if you recruit independently — you can still post roles.
+                </small>
+              </label>
+
+              <div className="field">
+                <span>Your role</span>
+                <div className="tworow" style={{ marginTop: 6 }}>
+                  {[
+                    ["Company admin", true],
+                    ["Recruiter", false],
+                  ].map(([label, value]) => (
+                    <button
+                      key={String(label)}
+                      type="button"
+                      className="btn ghost"
+                      style={{
+                        marginTop: 0,
+                        background: companyAdmin === value ? "var(--brand)" : undefined,
+                        color: companyAdmin === value ? "#fff" : undefined,
+                      }}
+                      aria-pressed={companyAdmin === value}
+                      onClick={() => setCompanyAdmin(value as boolean)}
+                    >
+                      {label as string}
+                    </button>
+                  ))}
+                </div>
+                <small style={{ color: "var(--dim)", fontSize: 12 }}>
+                  Admins manage the team and billing. Both can post roles.
+                </small>
+              </div>
+            </>
+          ) : null}
 
           {!signup ? (
             <p style={{ margin: "-4px 0 12px", fontSize: 13 }}>
