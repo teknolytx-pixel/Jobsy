@@ -3,6 +3,7 @@ import { env } from "@/lib/env";
 import { deactivateStale, ingestAll } from "@/lib/ingest";
 import { activeProviders, ALL_PROVIDERS } from "@/lib/providers";
 import { listSources, syncAllSources } from "@/lib/sources";
+import { syncFollowedEmployers } from "@/lib/followedEmployers";
 import { runMaintenance } from "@/lib/maintenance";
 import { secretEquals } from "@/lib/tokens";
 
@@ -104,6 +105,13 @@ async function runIngest() {
   } = await syncAllSources({ deadline: started + Math.round(BUDGET_MS * 0.55) });
   // 2. broad — query-based discovery across the aggregators, bounded by the
   //    clock and rotating least-recently-run boards first.
+  /*
+   * Followed employers run alongside connected sources. They exist for the
+   * careers sites nothing can read, so leaving them out of the schedule would
+   * make the escape hatch a one-off import rather than a subscription.
+   */
+  const followed = await syncFollowedEmployers({ deadline: started + Math.round(BUDGET_MS * 0.7) });
+
   const { runs, skipped, truncated } = await ingestAll({ deadline });
   const deactivated = await deactivateStale();
   // 3. housekeeping — ghost-job expiry, data purge, rate-limit sweep.
@@ -130,6 +138,17 @@ async function runIngest() {
     );
 
   return NextResponse.json({
+    followedEmployers: {
+      count: followed.length,
+      created: followed.reduce((a, f) => a + f.created, 0),
+      matched: followed.reduce((a, f) => a + f.matched, 0),
+      // Named individually, because a zero against one employer means
+      // something different from a zero across all of them.
+      results: followed.map((f) => ({
+        name: f.name, matched: f.matched, created: f.created,
+        providers: f.providers, error: f.error ?? null,
+      })),
+    },
     ok: true,
     ms: Date.now() - started,
     connectedCompanies: {

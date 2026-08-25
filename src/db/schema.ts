@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   boolean,
   index,
@@ -906,6 +906,46 @@ export const sourcedCandidates = pgTable(
   ]
 );
 
+/**
+ * An employer we follow through the job boards rather than through their site.
+ *
+ * ── Why this exists ──
+ *
+ * Some large employers' careers sites cannot be read by anything that is not a
+ * browser: the jobs are fetched after the page loads, there is no feed, no
+ * schema.org data, no sitemap of jobs. Infosys and Wipro are both like this.
+ * No amount of parsing fixes that, because there is nothing in the document to
+ * parse.
+ *
+ * But those same jobs are already indexed by Indeed, LinkedIn and Glassdoor,
+ * and Jobsy already licenses aggregators that resell those indexes. So instead
+ * of fighting a site that does not want to be read, we ask the boards for that
+ * employer by name. Same jobs, licensed data, no scraping.
+ *
+ * It is a worse instrument in one respect and better in another: the aggregator
+ * may lag the careers site by a day and may miss roles the employer never
+ * syndicated — but it works on every large employer, immediately, with no
+ * cooperation from them.
+ */
+export const followedEmployers = pgTable(
+  "followed_employers",
+  {
+    id: varchar("id", { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+    /** As a person would type it. Matched case-insensitively against results. */
+    name: varchar("name", { length: 160 }).notNull(),
+    /** The careers URL that failed, kept so the reason for this row is legible. */
+    careersUrl: text("careers_url"),
+    enabled: boolean("enabled").notNull().default(true),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    lastCount: integer("last_count").notNull().default(0),
+    totalImported: integer("total_imported").notNull().default(0),
+    addedById: varchar("added_by_id", { length: 36 }).references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("followed_employers_name_idx").on(sql`lower(${t.name})`)]
+);
+
 export const companiesRelations = relations(companies, ({ many }) => ({
   jobs: many(jobs),
   users: many(users),
@@ -960,6 +1000,7 @@ export type JobSource = (typeof jobSourceEnum.enumValues)[number];
 export type EmailTemplate = (typeof emailTemplateEnum.enumValues)[number];
 export type JobSourceRow = typeof jobSources.$inferSelect;
 export type CandidateSourceRow = typeof candidateSources.$inferSelect;
+export type FollowedEmployerRow = typeof followedEmployers.$inferSelect;
 export type SourcedCandidateRow = typeof sourcedCandidates.$inferSelect;
 export type CandidateSourceKind = (typeof candidateSourceKindEnum.enumValues)[number];
 export type CandidateState = (typeof candidateStateEnum.enumValues)[number];

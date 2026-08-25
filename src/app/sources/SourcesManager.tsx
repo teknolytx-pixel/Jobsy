@@ -24,11 +24,61 @@ export default function SourcesManager({ initial }: { initial: Source[] }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<
     | { ok: true; text: string }
-    | { ok: false; text: string; suggestions: string[]; trace?: string[] }
+    | { ok: false; text: string; suggestions: string[]; trace?: string[]; employer?: string }
     | null
   >(null);
   const [syncing, setSyncing] = useState<string | null>(null);
+  const [following, setFollowing] = useState(false);
   const { toast, toastNode } = useToast();
+
+  /** The company inside a careers hostname. digitalcareers.infosys.com → Infosys. */
+  const employerFromUrl = (raw: string): string | undefined => {
+    try {
+      const host = new URL(raw.startsWith("http") ? raw : `https://${raw}`).hostname;
+      const label = host
+        .replace(/^(www|jobs?|careers?|digitalcareers|apply|talent)\./i, "")
+        .split(".")[0]
+        .replace(/[-_]+/g, " ")
+        .trim();
+      if (!label) return undefined;
+      return label.length <= 3
+        ? label.toUpperCase()
+        : label.replace(/\b[a-z]/g, (c) => c.toUpperCase());
+    } catch {
+      return undefined;
+    }
+  };
+
+  const follow = async (name: string) => {
+    setFollowing(true);
+    try {
+      const r = await fetch("/api/sources/follow", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, careersUrl: url }),
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok || d?.result?.error) {
+        setResult({
+          ok: false,
+          text: d?.result?.error ?? d?.error ?? "Couldn't follow that employer.",
+          suggestions: [],
+        });
+        return;
+      }
+      const res = d.result;
+      setResult({
+        ok: true,
+        text:
+          res.created + res.updated > 0
+            ? `Following ${d.employer.name} — ${res.created} new, ${res.updated} refreshed from ${res.providers.join(", ")}.`
+            : `Following ${d.employer.name}, but the boards returned no matching jobs yet. Searched: ${res.providers.join(", ") || "no board is configured"}.`,
+      });
+      await refresh();
+    } finally {
+      setFollowing(false);
+    }
+  };
 
   const refresh = async () => {
     const res = await fetch("/api/sources", { cache: "no-store" });
@@ -53,6 +103,12 @@ export default function SourcesManager({ initial }: { initial: Source[] }) {
           text: data.error ?? "Couldn't connect that site",
           suggestions: data.suggestions ?? [],
           trace: data.trace ?? [],
+          /*
+           * The employer's name, guessed from the host, so the escape hatch can
+           * be offered by name rather than as an empty box. digitalcareers.
+           * infosys.com is Infosys whatever the page failed to say.
+           */
+          employer: employerFromUrl(url),
         });
         return;
       }
@@ -170,6 +226,31 @@ export default function SourcesManager({ initial }: { initial: Source[] }) {
                   ))}
                 </ul>
               </details>
+            ) : null}
+            {/*
+              * The escape hatch, offered at the exact moment it is needed.
+              *
+              * A careers site that renders its jobs in the browser cannot be
+              * read without one, and nothing in the parser will ever change
+              * that. But the boards already index these employers, so the
+              * honest next move is to stop fighting the site and ask the
+              * boards — offered here rather than left for someone to discover.
+              */}
+            {result.employer ? (
+              <div style={{ marginTop: 12 }}>
+                <button
+                  className="btn"
+                  disabled={following}
+                  onClick={() => void follow(result.employer!)}
+                >
+                  {following ? "Searching the job boards…" : `Follow ${result.employer} through job boards instead`}
+                </button>
+                <small style={{ display: "block", marginTop: 6, color: "var(--dim)", fontSize: 12.5, lineHeight: 1.5 }}>
+                  Pulls this employer&rsquo;s jobs from the boards Jobsy licenses — the same listings
+                  that appear on Indeed and LinkedIn. It won&rsquo;t catch roles they never
+                  syndicated, and it may lag their own site by a day.
+                </small>
+              </div>
             ) : null}
             {result.suggestions.length ? (
               <ul style={{ margin: "8px 0 0", paddingLeft: 18, lineHeight: 1.6 }}>
