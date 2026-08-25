@@ -29,6 +29,39 @@ export default function SourcesManager({ initial }: { initial: Source[] }) {
   >(null);
   const [syncing, setSyncing] = useState<string | null>(null);
   const [following, setFollowing] = useState(false);
+  const [syncingAll, setSyncingAll] = useState(false);
+
+  /**
+   * One button, everything.
+   *
+   * The nightly run does this already; the button exists because "wait until
+   * tomorrow to find out whether that connection works" is a miserable way to
+   * run a job board.
+   *
+   * It reports what it did NOT get to as well as what it did. A 60-second
+   * function cannot walk every source of a large deployment, and a summary that
+   * quietly omits the ones the clock ran out on would read as "all done" when
+   * half the list is untouched.
+   */
+  const syncEverything = async () => {
+    setSyncingAll(true);
+    try {
+      const r = await fetch("/api/sources/sync-all", { method: "POST" });
+      const d = await r.json().catch(() => null);
+      if (!r.ok) {
+        toast(d?.error ?? `Sync failed (${r.status})`);
+        return;
+      }
+      const parts = [`${d.created} new, ${d.updated} refreshed`];
+      parts.push(`${d.syncedSources} source(s), ${d.syncedEmployers} followed employer(s) in ${d.seconds}s`);
+      if (d.deferred?.length) parts.push(`ran out of time on ${d.deferred.length} — press again to continue`);
+      if (d.failures?.length) parts.push(`${d.failures.length} failed`);
+      toast(parts.join(" · "));
+      await refresh();
+    } finally {
+      setSyncingAll(false);
+    }
+  };
   const { toast, toastNode } = useToast();
 
   /** The company inside a careers hostname. digitalcareers.infosys.com → Infosys. */
@@ -277,9 +310,26 @@ export default function SourcesManager({ initial }: { initial: Source[] }) {
           them in seconds.
         </div>
 
-        <h4 style={{ margin: "22px 0 8px", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".9px", color: "var(--dim2)", fontWeight: 800 }}>
-          {sources.length} connected
-        </h4>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, margin: "22px 0 8px" }}>
+          <h4 style={{ margin: 0, fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".9px", color: "var(--dim2)", fontWeight: 800 }}>
+            {sources.length} connected
+          </h4>
+          {sources.length ? (
+            <button
+              className="btn ghost"
+              style={{ width: "auto", padding: "8px 14px", marginTop: 0, fontSize: 13 }}
+              disabled={syncingAll}
+              onClick={() => void syncEverything()}
+            >
+              {syncingAll ? "Syncing everything…" : "Sync all now"}
+            </button>
+          ) : null}
+        </div>
+        <p style={{ margin: "0 0 12px", fontSize: 12.5, color: "var(--dim)", lineHeight: 1.55 }}>
+          Everything here syncs on its own overnight. &ldquo;Sync all now&rdquo; runs the same pass
+          immediately — it works through the least-recently-synced first, so if it runs out of
+          time it says so and pressing again continues where it stopped.
+        </p>
 
         {sources.length === 0 ? (
           <div className="emptylist">
