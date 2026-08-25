@@ -161,7 +161,7 @@ export const jobSourceFor = (k: SourceKind) =>
 // ─────────────────────────────────────────────────────────────
 export type ConnectResult =
   | { ok: true; source: JobSourceRow; detection: Detection; imported: number; alreadyExisted: boolean }
-  | { ok: false; error: string; suggestions: string[] };
+  | { ok: false; error: string; suggestions: string[]; trace?: string[] };
 
 /**
  * Paste a careers URL → detect → save → immediately pull, so the person who
@@ -171,7 +171,7 @@ export async function connectByUrl(rawUrl: string, addedById?: string): Promise<
   const detected = await detectSource(rawUrl);
   if (detected.kind === null) {
     const f = detected as DetectionFailure;
-    return { ok: false, error: f.reason, suggestions: f.suggestions };
+    return { ok: false, error: f.reason, suggestions: f.suggestions, trace: f.trace };
   }
   const d = detected as Detection;
   return connectDetected(d, rawUrl, addedById);

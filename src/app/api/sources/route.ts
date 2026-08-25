@@ -115,7 +115,10 @@ export async function POST(req: Request) {
         );
 
     if (!result.ok) {
-      return NextResponse.json({ error: result.error, suggestions: result.suggestions }, { status: 422 });
+      return NextResponse.json(
+        { error: result.error, suggestions: result.suggestions, trace: result.trace ?? [] },
+        { status: 422 }
+      );
     }
 
     return NextResponse.json({

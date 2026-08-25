@@ -844,6 +844,50 @@ check("TC-CRAWL-242 and the importer pulls them", spaJobs.length === 3, `${spaJo
 
 globalThis.fetch = beforeSpa;
 
+
+// ─────────────────────────────────────────────────────────────
+// SAYING WHAT WAS TRIED
+//
+// Four rounds of "why won't this site connect" were answered by guessing,
+// because the failure named what we did not FIND and never what we LOOKED AT.
+// ─────────────────────────────────────────────────────────────
+console.log("\nTHE FAILURE EXPLAINS ITSELF\n");
+
+const OPAQUE: Record<string, string> = {
+  "https://opaque-co.example/robots.txt": "User-agent: *\nDisallow: /private/\n",
+  "https://opaque-co.example/careers": `<!doctype html><html><head><title>Careers</title>
+    <script src="https://tbcdn.talentbrew.com/app.js"></script></head>
+    <body><div id="app"></div></body></html>`,
+};
+const beforeTrace = globalThis.fetch;
+globalThis.fetch = (async (input: RequestInfo | URL) => {
+  const url = (typeof input === "string" ? input : input.toString()).replace(/\/$/, "");
+  const body = OPAQUE[url] ?? OPAQUE[url + "/"];
+  if (body === undefined) return new Response("", { status: 404 });
+  return new Response(body, { status: 200, headers: { "Content-Type": "text/html" } });
+}) as typeof fetch;
+
+const opaque = await detectSource("https://opaque-co.example/careers", PUBLIC_DNS);
+const tr = opaque.kind === null ? opaque.trace : [];
+check("TC-CRAWL-250 a failure reports what was tried", tr.length >= 4, `${tr.length} steps`);
+check("TC-CRAWL-251 including what robots.txt said",
+  tr.some((t) => /robots\.txt/i.test(t)), tr[0] ?? "—");
+check("TC-CRAWL-252 and that the page was read",
+  tr.some((t) => /bytes read/i.test(t)), tr.find((t) => /bytes/.test(t)) ?? "—");
+check("TC-CRAWL-253 and whether the page carried job data",
+  tr.some((t) => /page data/i.test(t)), tr.find((t) => /page data/.test(t)) ?? "—");
+check("TC-CRAWL-254 and whether any job pages were found",
+  tr.some((t) => /job pages/i.test(t)), tr.find((t) => /job pages/.test(t)) ?? "—");
+check("TC-CRAWL-255 the vendor is still named", opaque.kind === null && /Radancy/i.test(opaque.reason));
+
+/** A site refused by robots says so in one line, and stops there. */
+const blocked = await detectSource("https://opaque-co.example/private/jobs", PUBLIC_DNS);
+check("TC-CRAWL-256 a robots refusal is traced, not silent",
+  blocked.kind === null && blocked.trace.some((t) => /disallows/i.test(t)),
+  blocked.kind === null ? blocked.trace.join(" | ").slice(0, 90) : "—");
+
+globalThis.fetch = beforeTrace;
+
 globalThis.fetch = realFetch;
 console.log(`\n${pass} passed, ${fail} failed  —  crawl\n`);
 process.exit(fail ? 1 : 0);

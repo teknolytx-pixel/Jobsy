@@ -63,6 +63,19 @@ export type DetectionFailure = {
   kind: null;
   reason: string;
   suggestions: string[];
+  /**
+   * What was actually tried, in order.
+   *
+   * Added because four separate rounds of "why won't this site connect" were
+   * answered by guessing. The failure message said what we did not FIND; it
+   * never said what we LOOKED AT, so nobody — including whoever wrote the
+   * detector — could tell whether a site had no job links, or had them behind a
+   * robots rule, or had them in a sitemap we never reached.
+   *
+   * Nothing here is sensitive: it is a list of the requests we made against a
+   * public careers page, which the operator is entitled to see.
+   */
+  trace: string[];
 };
 
 const UA = { "User-Agent": "Jobsy/1.0 (+job aggregation; contact: hello@jobsy.app)" };
@@ -188,7 +201,7 @@ export async function detectSource(
   try {
     url = new URL(rawUrl.trim().startsWith("http") ? rawUrl.trim() : `https://${rawUrl.trim()}`);
   } catch {
-    return { kind: null, reason: "That doesn't look like a URL.", suggestions: [] };
+    return { kind: null, reason: "That doesn't look like a URL.", suggestions: [], trace: [] };
   }
 
   const domainName = titleCase(url.hostname.replace(/^(www|careers|jobs|apply)\./, "").split(".")[0]);
@@ -224,7 +237,14 @@ export async function detectSource(
    * blocks bots at the edge, useless. Saying so is more helpful than a generic
    * failure, because it tells the recruiter the problem is not their URL.
    */
+  const trace: string[] = [];
+
   const rules = await fetchRobots(url.origin, deps);
+  trace.push(
+    rules.disallow.length
+      ? `robots.txt: ${rules.disallow.length} disallow rule(s), ${rules.sitemaps.length} sitemap(s) declared`
+      : `robots.txt: nothing disallowed, ${rules.sitemaps.length} sitemap(s) declared`
+  );
   if (!robotsAllows(rules, url.pathname + url.search)) {
     const vendor = recogniseVendor(url.toString());
     return {
@@ -236,14 +256,16 @@ export async function detectSource(
         "Try the page one level up — many sites disallow their search results but not the careers index itself.",
         ...manualSuggestions(),
       ],
+      trace: [...trace, `refused: robots.txt disallows ${url.pathname}`],
     };
   }
 
   const fetched = await safeFetch(url.toString(), deps);
   if (!fetched.ok) {
-    return { kind: null, reason: fetched.reason, suggestions: manualSuggestions() };
+    return { kind: null, reason: fetched.reason, suggestions: manualSuggestions(), trace: [...trace, `fetch failed: ${fetched.reason}`] };
   }
   const html = fetched.body.slice(0, 900_000);
+  trace.push(`page: ${html.length.toLocaleString()} bytes read from ${fetched.finalUrl}`);
 
   // ── 2. an ATS is embedded in the page ──
   const fromHtml = matchPatterns(html);
@@ -314,6 +336,7 @@ export async function detectSource(
    * blob in a string is a failure of effort, not of possibility.
    */
   const embedded = jobsFromEmbeddedJson(html, fetched.finalUrl, siteNameFrom(html) ?? domainName);
+  trace.push(`page data: ${embedded.length} job-shaped record(s) in the page's own JSON`);
   if (embedded.length >= 2) {
     return {
       kind: "JSONLD",
@@ -331,9 +354,15 @@ export async function detectSource(
   // rendered client-side and links to nothing. Only a handful of pages are
   // opened here: this is a question ("is this site readable?"), not an import.
   const { urls, via } = await findJobPages(fetched.finalUrl, html, rules, PROBE_LIMIT, deps);
+  trace.push(
+    urls.length
+      ? `job pages: ${urls.length} found via ${via} — e.g. ${urls[0]}`
+      : `job pages: none found by following links, and none in the sitemap`
+  );
   if (urls.length) {
     const probed = await fetchJobPages(urls, rules, deps);
     const records = probed.flatMap((p) => findJsonLdJobPostings(p.html));
+    trace.push(`probed ${probed.length} job page(s): ${records.length} carried JobPosting data`);
     if (records.length) {
       return {
         kind: "JSONLD_CRAWL",
@@ -379,14 +408,16 @@ export async function detectSource(
         "Once you have the feed URL, paste it here instead and it will connect in seconds.",
         "In the meantime you can import individual jobs by URL from the Post a job screen.",
       ],
+      trace,
     };
   }
 
   return {
     kind: null,
     reason:
-      `Jobsy read ${url.hostname} and everything it links to, and found nothing machine-readable: no ATS it recognises, no schema.org JobPosting data on the page or on the jobs, and no XML feed. That usually means the jobs only exist inside a JavaScript app.`,
+      `Jobsy read ${url.hostname} and everything it links to, and found nothing machine-readable: no ATS it recognises, no schema.org JobPosting data on the page or on the jobs, no page data, and no XML feed. That usually means the jobs are fetched by the browser after the page loads.`,
     suggestions: manualSuggestions(),
+    trace,
   };
 }
 

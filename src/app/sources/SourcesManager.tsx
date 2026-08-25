@@ -24,7 +24,7 @@ export default function SourcesManager({ initial }: { initial: Source[] }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<
     | { ok: true; text: string }
-    | { ok: false; text: string; suggestions: string[] }
+    | { ok: false; text: string; suggestions: string[]; trace?: string[] }
     | null
   >(null);
   const [syncing, setSyncing] = useState<string | null>(null);
@@ -48,7 +48,12 @@ export default function SourcesManager({ initial }: { initial: Source[] }) {
       });
       const data = await res.json();
       if (!res.ok) {
-        setResult({ ok: false, text: data.error ?? "Couldn't connect that site", suggestions: data.suggestions ?? [] });
+        setResult({
+          ok: false,
+          text: data.error ?? "Couldn't connect that site",
+          suggestions: data.suggestions ?? [],
+          trace: data.trace ?? [],
+        });
         return;
       }
       setResult({
@@ -146,6 +151,26 @@ export default function SourcesManager({ initial }: { initial: Source[] }) {
         {result && !result.ok ? (
           <div className="err">
             {result.text}
+            {/*
+              * What was actually tried, folded away.
+              *
+              * Four rounds of "why won't this connect" were answered by
+              * guessing, because the message said what we did not FIND and
+              * never what we LOOKED AT. Collapsed by default — a recruiter
+              * wants the sentence above, and whoever is debugging wants this.
+              */}
+            {result.trace?.length ? (
+              <details style={{ margin: "10px 0 0" }}>
+                <summary style={{ cursor: "pointer", fontSize: 12.5, color: "var(--dim2)" }}>
+                  What Jobsy tried
+                </summary>
+                <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 12.5, color: "var(--dim)", lineHeight: 1.6 }}>
+                  {result.trace.map((t, i) => (
+                    <li key={i} style={{ wordBreak: "break-word" }}>{t}</li>
+                  ))}
+                </ul>
+              </details>
+            ) : null}
             {result.suggestions.length ? (
               <ul style={{ margin: "8px 0 0", paddingLeft: 18, lineHeight: 1.6 }}>
                 {result.suggestions.map((s, i) => <li key={i}>{s}</li>)}
