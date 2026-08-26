@@ -71,6 +71,18 @@ export default function JobComposer({
     e.preventDefault();
     // Catch it here rather than letting the server reject it, so the message
     // lands next to the control the recruiter has to act on.
+    /*
+     * The ZIP is what makes two postings the same posting.
+     *
+     * Country plus state plus postal code is the workplace identity used for
+     * de-duplication, so a role published without one arrives from three job
+     * boards as three separate jobs and a candidate swipes past the same
+     * vacancy three times. It was optional and shouldn't have been.
+     */
+    if (!f.postalCode.trim()) {
+      setErr("A ZIP code is required — it identifies the workplace so the same role isn't listed twice.");
+      return;
+    }
     if (!f.attest) {
       setErr("Please confirm this is a current, open vacancy that you're authorized to advertise.");
       return;
@@ -158,12 +170,13 @@ export default function JobComposer({
         </div>
 
         <label className="field">
-          <span>Postal / ZIP code — optional</span>
+          <span>ZIP code</span>
           <input
             value={f.postalCode}
             onChange={(e) => set("postalCode", e.target.value)}
             placeholder="78701"
             inputMode="text"
+            required
           />
           <small style={{ color: "var(--dim)", fontSize: 12 }}>
             Used to identify the workplace, so the same role coming from several job
@@ -208,11 +221,35 @@ export default function JobComposer({
         <div className="two">
           <label className="field">
             <span>Salary min ($k)</span>
-            <input type="number" value={f.salaryMin} onChange={(e) => set("salaryMin", e.target.value)} placeholder="150" />
+            <input
+              type="number"
+              className="nospin"
+              min={0}
+              step={1}
+              inputMode="numeric"
+              value={f.salaryMin}
+              /*
+               * Negatives are refused at the point of typing, not just at
+               * submit. A salary cannot be less than nothing, and a form that
+               * accepts "-150" and then rejects the whole posting has wasted
+               * the recruiter's time to tell them something it knew instantly.
+               */
+              onChange={(e) => set("salaryMin", e.target.value.replace(/[^0-9]/g, ""))}
+              placeholder="150"
+            />
           </label>
           <label className="field">
             <span>Salary max ($k)</span>
-            <input type="number" value={f.salaryMax} onChange={(e) => set("salaryMax", e.target.value)} placeholder="185" />
+            <input
+              type="number"
+              className="nospin"
+              min={0}
+              step={1}
+              inputMode="numeric"
+              value={f.salaryMax}
+              onChange={(e) => set("salaryMax", e.target.value.replace(/[^0-9]/g, ""))}
+              placeholder="185"
+            />
           </label>
         </div>
 

@@ -78,7 +78,15 @@ const Body = z.object({
    * not carry one, but strongly preferred: with it, the same role arriving from
    * three job boards collapses to one card instead of three.
    */
-  postalCode: z.string().max(12).nullable().optional(),
+  /*
+   * Required for a role posted in-app, optional for one INGESTED.
+   *
+   * The distinction matters: a recruiter typing a posting knows the ZIP and it
+   * is what makes two copies of the same vacancy resolve to one job. A feed we
+   * scraped often has no postal code at all, and refusing those would throw
+   * away most of the corpus to enforce a field nobody could supply.
+   */
+  postalCode: z.string().min(3, "A ZIP code is required").max(12),
   /** RMT-004 — required when the role is remote. */
   remoteScope: z.enum(["SAME_COUNTRY", "COUNTRIES", "STATES", "REGION", "WORLDWIDE"]).nullable().optional(),
   remoteScopeCountries: z.array(z.string().length(2)).max(50).optional(),

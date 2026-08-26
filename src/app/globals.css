@@ -356,6 +356,19 @@ svg{stroke:currentColor}
 .tworow{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:end}
 .tworow .field{margin-top:12px}
 
+/* ─────────────────────────────────────────────────────────────
+   NUMBER FIELDS WITHOUT SPINNERS
+
+   The little up/down arrows are wrong for a salary. They imply stepping
+   through values one at a time when nobody nudges 150 to 151, they are a
+   two-pixel target on a phone, and a mis-click silently changes a number the
+   person has already typed. The field stays type=number for the numeric
+   keypad and validation; only the stepper goes.
+   ───────────────────────────────────────────────────────────── */
+.nospin::-webkit-outer-spin-button,
+.nospin::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.nospin{-moz-appearance:textfield;appearance:textfield}
+
 /* ═══════════════════════════════════════════════════════════════
    RESPONSIVE
 

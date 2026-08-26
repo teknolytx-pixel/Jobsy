@@ -11,6 +11,7 @@ export default async function ProfilePage() {
 
   return (
     <ProfileEditor
+      isRecruiter={user.role === "RECRUITER"}
       initial={{
         name: user.name,
         email: user.email,

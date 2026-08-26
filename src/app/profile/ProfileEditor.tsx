@@ -26,15 +26,27 @@ export default function ProfileEditor({
   linkedinLinked,
   linkedinAvailable,
   isPlatformAdmin = false,
+  isRecruiter = false,
 }: {
   initial: Initial;
   linkedinLinked: boolean;
   linkedinAvailable: boolean;
   isPlatformAdmin?: boolean;
+  /** Recruiter-only fields are hidden rather than shown and rejected. */
+  isRecruiter?: boolean;
 }) {
   const [f, setF] = useState({
     ...initial,
-    salaryTarget: initial.salaryTarget ?? 0,
+    /*
+     * Empty, not zero.
+     *
+     * `?? 0` put a literal 0 in the box for everyone who had never answered,
+     * which reads as "I want nothing" rather than "I haven't said". A blank
+     * field asks the question; a zero answers it wrongly on the candidate's
+     * behalf — and the matcher treats a stated target very differently from an
+     * absent one.
+     */
+    salaryTarget: initial.salaryTarget == null ? "" : String(initial.salaryTarget),
     skills: initial.skills.join(", "),
     currentCountry: initial.currentCountry ?? "",
     currentPostalCode: initial.currentPostalCode ?? "",
@@ -61,6 +73,18 @@ export default function ProfileEditor({
           ? "YES"
           : "NO",
   });
+  /**
+   * The stored value is a phrase — "2 weeks" — because that is what every
+   * screen already renders and what the job description parser reads. Split it
+   * for editing, rejoin it on save: a schema change here would ripple into the
+   * matcher for no gain the candidate can see.
+   */
+  const parsedAvailability = /^(\d+)\s*(day|week|month)/i.exec(initial.availability ?? "");
+  const [availNumber, setAvailNumber] = useState(parsedAvailability?.[1] ?? "");
+  const [availUnit, setAvailUnit] = useState(
+    parsedAvailability ? `${parsedAvailability[2].toLowerCase()}s` : "weeks"
+  );
+
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((p) => ({ ...p, [k]: v }));
@@ -78,8 +102,14 @@ export default function ProfileEditor({
         location: f.location,
         remotePref: f.remotePref,
         yearsExp: Number(f.yearsExp) || 0,
-        salaryTarget: Number(f.salaryTarget) || null,
-        availability: f.availability,
+        salaryTarget: f.salaryTarget === "" ? null : Number(f.salaryTarget),
+        /*
+         * "1 weeks" is wrong and a person notices. Singularised on the way out,
+         * and an empty number means available now rather than "0 weeks".
+         */
+        availability: availNumber
+          ? `${availNumber} ${availNumber === "1" ? availUnit.replace(/s$/, "") : availUnit}`
+          : "Available now",
         bio: f.bio,
         openToOffers: f.openToOffers,
         title: f.title,
@@ -202,7 +232,7 @@ export default function ProfileEditor({
               </small>
             </label>
             <label className="field">
-              <span>Postal / ZIP code — optional</span>
+              <span>ZIP code — optional</span>
               <input
                 value={f.currentPostalCode}
                 onChange={(e) => set("currentPostalCode", e.target.value)}
@@ -342,31 +372,72 @@ export default function ProfileEditor({
               <span>Target salary ($k)</span>
               <input
                 type="number"
+                className="nospin"
+                min={0}
+                inputMode="numeric"
+                placeholder="e.g. 160"
                 value={f.salaryTarget}
-                onChange={(e) => set("salaryTarget", Number(e.target.value))}
+                onChange={(e) => set("salaryTarget", e.target.value.replace(/[^0-9]/g, ""))}
               />
             </label>
           </div>
-          <label className="field">
-            <span>Availability</span>
-            <input value={f.availability} onChange={(e) => set("availability", e.target.value)} />
-          </label>
+          {/*
+            * Availability is a number AND a unit.
+            *
+            * A single free-text box collected "2 weeks", "2wks", "a fortnight"
+            * and "ASAP" — four spellings of two facts, none of them sortable or
+            * comparable. Split at the point of entry, and stored as the plain
+            * phrase the rest of the app already reads.
+            */}
+          <div className="field">
+            <span>Availability — notice period</span>
+            <div className="tworow" style={{ marginTop: 5 }}>
+              <input
+                type="number"
+                className="nospin"
+                min={0}
+                inputMode="numeric"
+                placeholder="2"
+                value={availNumber}
+                onChange={(e) => setAvailNumber(e.target.value.replace(/[^0-9]/g, ""))}
+              />
+              <select value={availUnit} onChange={(e) => setAvailUnit(e.target.value)}>
+                <option value="days">days</option>
+                <option value="weeks">weeks</option>
+                <option value="months">months</option>
+              </select>
+            </div>
+            <small style={{ color: "var(--dim)", fontSize: 12 }}>
+              Leave the number blank if you can start immediately.
+            </small>
+          </div>
           <label className="field">
             <span>Skills — comma separated</span>
             <input value={f.skills} onChange={(e) => set("skills", e.target.value)} />
           </label>
           <label className="field">
-            <span>About</span>
+            <span>About yourself</span>
             <textarea value={f.bio} onChange={(e) => set("bio", e.target.value)} />
           </label>
-          <label className="field">
-            <span>Recruiter title (if you post jobs)</span>
-            <input
-              value={f.title}
-              onChange={(e) => set("title", e.target.value)}
-              placeholder="Talent Partner"
-            />
-          </label>
+          {/*
+            * Shown to recruiters only.
+            *
+            * "Recruiter title (if you post jobs)" sat on every job seeker's
+            * profile and implied posting was something they could do. It is
+            * not: /api/jobs refuses a candidate account outright. A field that
+            * suggests a permission the account does not have is a bug in the
+            * form, not a hint.
+            */}
+          {isRecruiter ? (
+            <label className="field">
+              <span>Your title</span>
+              <input
+                value={f.title}
+                onChange={(e) => set("title", e.target.value)}
+                placeholder="Talent Partner"
+              />
+            </label>
+          ) : null}
 
           <label
             style={{
