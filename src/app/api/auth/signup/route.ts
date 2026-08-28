@@ -9,6 +9,7 @@ import { sendVerification } from "@/lib/verification";
 import { newToken, hashToken } from "@/lib/tokens";
 import { CURRENT_TERMS, CURRENT_PRIVACY } from "@/lib/legalVersions";
 import { stateOf } from "@/lib/compliance/jurisdiction";
+import { createProfile } from "@/lib/profiles";
 import { deliverAedtNotice } from "@/lib/compliance/aedt";
 
 const Body = z.object({
@@ -185,6 +186,26 @@ export async function POST(req: Request) {
         })
         .onConflictDoNothing();
     }
+  }
+
+  /*
+   * CAN-00x — the general profile, created at registration.
+   *
+   * A candidate with no profile matches nothing, and would have no way to tell
+   * why: the profile screen would offer to create one, which reads as a chore
+   * rather than a cause. Seeded from what they just typed, so the first profile
+   * already contains their skills rather than being an empty shell.
+   */
+  if (role === "CANDIDATE") {
+    await createProfile(user.id, {
+      label: "General",
+      headline: null,
+      skills: user.skills,
+      yearsExp: 0,
+      salaryTarget: null,
+      availability: null,
+      bio: null,
+    });
   }
 
   // XPLAIN-002 — the AEDT notice is delivered at signup, before any automated

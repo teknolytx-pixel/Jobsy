@@ -17,7 +17,7 @@
     "test:providers": "tsx scripts/test-providers.mts",
     "test:e2e": "SEED_PASSWORD=local-e2e-password npm run reset && SEED_PASSWORD=local-e2e-password npm run seed && SEED_PASSWORD=local-e2e-password node scripts/e2e.mjs",
     "test:sources": "tsx scripts/test-sources.mts",
-    "test": "npm run guard && npm run test:matching && npm run test:confidence && npm run test:skillmatch && npm run test:geo && npm run test:demand && npm run test:jobstatus && npm run test:authorization && npm run test:appstatus && npm run test:ai && npm run test:resume && npm run test:jobimport && npm run test:providers && npm run test:sources && npm run test:crawl && npm run test:follow && npm run test:forms && npm run test:paging && npm run test:candidates && npm run test:compliance && npm run test:ssrf && npm run test:health && npm run test:security",
+    "test": "npm run guard && npm run test:matching && npm run test:confidence && npm run test:skillmatch && npm run test:geo && npm run test:demand && npm run test:jobstatus && npm run test:authorization && npm run test:appstatus && npm run test:ai && npm run test:resume && npm run test:jobimport && npm run test:providers && npm run test:sources && npm run test:crawl && npm run test:follow && npm run test:forms && npm run test:profiles && npm run test:paging && npm run test:candidates && npm run test:compliance && npm run test:ssrf && npm run test:health && npm run test:security",
     "db:migrate": "drizzle-kit migrate",
     "test:matching": "tsx scripts/test-matching.mts",
     "guard": "tsx scripts/check-prohibited-inputs.mts",
@@ -52,7 +52,8 @@
     "test:paging": "tsx scripts/test-paging.mts",
     "test:candidates": "tsx scripts/test-candidates.mts",
     "test:follow": "tsx scripts/test-follow.mts",
-    "test:forms": "tsx scripts/test-forms.mts"
+    "test:forms": "tsx scripts/test-forms.mts",
+    "test:profiles": "tsx scripts/test-profiles.mts"
   },
   "dependencies": {
     "bcryptjs": "3.0.3",

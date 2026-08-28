@@ -4,6 +4,7 @@ import { useState } from "react";
 // Country list only — the centroid table stays server-side.
 import { COUNTRIES, REGIONS } from "@/lib/geo/countries";
 import { Icon } from "@/components/Icon";
+import ProfileSwitcher from "./ProfileSwitcher";
 
 type Initial = {
   name: string; email: string; headline: string; location: string; remotePref: string;
@@ -187,6 +188,16 @@ export default function ProfileEditor({
         ) : null}
 
         <form onSubmit={save}>
+          {/*
+            * Above the fields, not below them.
+            *
+            * The fields edit whichever profile is LIVE. Showing which one that
+            * is after the inputs would let somebody type a page of changes
+            * before discovering they were editing a different direction from
+            * the one they meant.
+            */}
+          {isRecruiter ? null : <ProfileSwitcher />}
+
           <label className="field">
             <span>Name</span>
             <input value={f.name} onChange={(e) => set("name", e.target.value)} required />

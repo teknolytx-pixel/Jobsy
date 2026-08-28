@@ -1000,6 +1000,7 @@ export type JobSource = (typeof jobSourceEnum.enumValues)[number];
 export type EmailTemplate = (typeof emailTemplateEnum.enumValues)[number];
 export type JobSourceRow = typeof jobSources.$inferSelect;
 export type CandidateSourceRow = typeof candidateSources.$inferSelect;
+export type CandidateProfileRow = typeof candidateProfiles.$inferSelect;
 export type FollowedEmployerRow = typeof followedEmployers.$inferSelect;
 export type SourcedCandidateRow = typeof sourcedCandidates.$inferSelect;
 export type CandidateSourceKind = (typeof candidateSourceKindEnum.enumValues)[number];
@@ -1112,6 +1113,74 @@ export const companyInvitations = pgTable(
 );
 
 /** RESUME-001 — uploaded files. */
+/**
+ * A candidate's professional facets — one per direction they're job hunting in.
+ *
+ * ── Why this is a table and not more columns on `users` ──
+ *
+ * A person is one person: one name, one email, one place they live, one answer
+ * about visa sponsorship. Those stay on `users` and are asked once at
+ * registration.
+ *
+ * But a career is not one thing. The same individual is credibly a "Data
+ * Engineer" and an "ML Engineer", or is moving from delivery management into
+ * product, and each of those needs its own headline, its own skills, its own
+ * salary expectation and its OWN CV. Forcing them into one profile makes every
+ * application a compromise and every match a blur of two careers.
+ *
+ * ── Exactly one is primary, and only that one is matched ──
+ *
+ * The alternative — matching against all of a person's profiles — sounds
+ * generous and is not. It doubles their presence in every recruiter's deck,
+ * makes their match score incoherent (which profile was scored?), and gives a
+ * candidate with five profiles five times the exposure of one with a single
+ * honest profile. Matching stays on the primary; the others are drafts the
+ * person can promote when their search changes direction.
+ *
+ * The `users` row keeps a MIRROR of the primary profile's fields, maintained by
+ * `syncPrimaryToUser`. That is deliberate denormalisation: the matching engine
+ * and the deck queries read `users` in half a dozen places, and rewriting all of
+ * them to join a profile table would put the blast radius of this feature
+ * squarely on the one part of the product that must not regress.
+ */
+export const candidateProfiles = pgTable(
+  "candidate_profiles",
+  {
+    id: id(),
+    userId: varchar("user_id", { length: 36 })
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** What the candidate calls this direction: "Data Engineering". */
+    label: varchar("label", { length: 80 }).notNull(),
+    /**
+     * Only one per user may be true.
+     *
+     * Enforced by a partial unique index rather than by application code,
+     * because "exactly one primary" is an invariant and application code is
+     * where invariants go to be forgotten under a race.
+     */
+    isPrimary: boolean("is_primary").notNull().default(false),
+
+    headline: text("headline"),
+    skills: text("skills").array().notNull().default([]),
+    yearsExp: integer("years_exp").notNull().default(0),
+    salaryTarget: integer("salary_target"),
+    availability: text("availability"),
+    bio: text("bio"),
+    /** The CV that belongs to THIS direction. Null until one is uploaded. */
+    resumeId: varchar("resume_id", { length: 36 }),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("candidate_profiles_user_idx").on(t.userId),
+    uniqueIndex("candidate_profiles_one_primary_idx")
+      .on(t.userId)
+      .where(sql`${t.isPrimary}`),
+  ]
+);
+
 export const resumes = pgTable(
   "resumes",
   {

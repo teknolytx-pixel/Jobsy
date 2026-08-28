@@ -92,6 +92,13 @@
       "when": 1787639670128,
       "tag": "0012_followed_employers",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1787920323548,
+      "tag": "0013_candidate_profiles",
+      "breakpoints": true
     }
   ]
 }

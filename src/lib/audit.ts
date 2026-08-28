@@ -13,6 +13,16 @@ import { db, auditLog } from "@/db";
  */
 
 export type AuditAction =
+  /*
+   * Profiles.
+   *
+   * Promotion is audited because it changes which skills a person is matched
+   * on. A candidate reporting "I stopped seeing relevant jobs" is otherwise
+   * unanswerable — the profile now live may not be the one they think is.
+   */
+  | "profile.created"
+  | "profile.made_primary"
+  | "profile.deleted"
   // security
   | "auth.login.success"
   | "auth.login.failed"

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
-import { companies, db, users } from "@/db";
+import { and, eq } from "drizzle-orm";
+import { candidateProfiles, companies, db, users } from "@/db";
 import { AuthError, requireUser } from "@/lib/auth";
 import { normalizeSkills } from "@/lib/skills";
 import { normalisePostalCode, resolveLocation, toCountryCode, UNKNOWN_COUNTRY } from "@/lib/geo";
@@ -158,6 +158,34 @@ export async function PATCH(req: Request) {
       })
       .where(eq(users.id, user.id))
       .returning();
+
+    /*
+     * Write the same professional fields back onto the LIVE profile.
+     *
+     * This endpoint edits the mirror on `users`. Without this, a candidate
+     * updates their skills here, promotes a different profile later, and the
+     * promotion overwrites the mirror from a profile row that never saw the
+     * edit — their changes vanish with no error and no obvious cause.
+     *
+     * Mirror and source are kept in step in both directions, and this is the
+     * only other place that writes the profile row.
+     */
+    if (user.role === "CANDIDATE") {
+      await db
+        .update(candidateProfiles)
+        .set({
+          headline: updated.headline,
+          skills: updated.skills,
+          yearsExp: updated.yearsExp,
+          salaryTarget: updated.salaryTarget,
+          availability: updated.availability,
+          bio: updated.bio,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(eq(candidateProfiles.userId, user.id), eq(candidateProfiles.isPrimary, true))
+        );
+    }
 
     return NextResponse.json({ ok: true, profileReady: updated.profileReady, skills: updated.skills });
   } catch (e) {
