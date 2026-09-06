@@ -1,6 +1,6 @@
 # PRODUCT DESIGN DOCUMENT (PDD)
 
-**Product:** Jobsy · **Version:** 1.0.0-Release Candidate · **Source:** commit `e6ff279` (v2.52)
+**Product:** Jobsy · **Version:** 1.0.0-Release Candidate · **Source:** commit `53e0531` (v2.52)
 **Audience:** Product Designers, Frontend Engineers, QA / Software Testers
 
 > Companion documents: `DESIGN-SYSTEM.md` (what changed in v2.52 and why) · `SECURITY-AUDIT.md` (security posture) · `scripts/test-design.mts` (the executable form of §2)
@@ -249,7 +249,7 @@ Every control is icon-only, so every one carries an `aria-label`. The icon set i
 
 ## 4. VISUAL IMPLEMENTATION & SCREENSHOT BLUEPRINTS
 
-Captured from the running build at `e6ff279`, 430×932 at 2×, seeded demo data. **Light left, dark right** in every pair. Full-size boards are in the published PDD artifact.
+Captured from the running build at v2.52, 430×932 at 2×, seeded demo data. **Light left, dark right** in every pair. Full-size boards are in the published PDD artifact.
 
 | # | View | What it exercises |
 |---|---|---|
@@ -331,4 +331,4 @@ Recorded rather than omitted. A specification that lists only what passes is not
 
 ---
 
-*Generated from source at `e6ff279`. Every ratio in §2 is recomputed by `scripts/test-design.mts` on each run; every screenshot in §4 is from the running build. Where a number here disagrees with the code, the code is right and this document is stale — regenerate it.*
+*Generated from source at v2.52. Every ratio in §2 is recomputed by `scripts/test-design.mts` on each run; every screenshot in §4 is from the running build. Where a number here disagrees with the code, the code is right and this document is stale — regenerate it.*
