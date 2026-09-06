@@ -73,8 +73,10 @@ It is worth recording, because a report that lists only failures gives a false p
 `PRODUCTION.md` line 46 contained the live Neon password in plaintext — inside the very table instructing the reader to rotate it. The repository at `github.com/teknolytx-pixel/Jobsy` is public.
 
 ```
-| Neon database password (`npg_tc1u4LeafDdX`) | Rotate in the Neon console → ... |
+| Neon database password (`npg_REDACTED`) | Rotate in the Neon console → ... |
 ```
+
+*(The real value is redacted here. Quoting a live secret to illustrate that it was leaked is how it leaks a second time — the scanner in §3.4 flagged this very document on its first run, which is the argument for having it.)*
 
 **Impact:** with the password and the hostname (also in `DEPLOY-STEPS.md`), an attacker connects directly to the production database. That is every user record, every password hash, every resume reference, every private message. No application control matters at that point — they are past all of them.
 

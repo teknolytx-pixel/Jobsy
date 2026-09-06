@@ -13,17 +13,23 @@ import { Icon } from "./Icon";
  * to magenta). Held next to a photo of a real person on a card a recruiter is
  * deciding about, they were the loudest thing on screen. These are the same
  * eight positions in a professional register: slate, steel, teal, indigo,
- * clay. Every one clears 4.5:1 against the white initials on top.
+ * clay. Every one clears 4.5:1 against the off-white initials on top —
+ * asserted, not assumed: see TC-DESIGN-061.
  */
 const HUES = [
-  "#3d6ff0,#2b54c4", // indigo
-  "#2e9e76,#227a5b", // teal-green
-  "#5b6b8c,#3f4c68", // slate
-  "#8a6fbf,#6a539b", // muted violet
-  "#3f8fa8,#2d6b80", // steel blue
-  "#a8703f,#85582f", // clay
-  "#4a7f9e,#356179", // dusty blue
-  "#6f8a4f,#54693b", // olive
+  // Warmed and darkened from the previous set, for one measured reason: the
+  // old comment claimed every stop cleared 4.5:1 against the initials and the
+  // brightest (#3d6ff0) was 4.33:1. A claim in a comment is not a check, which
+  // is why TC-DESIGN-061 now computes this list on every run. Worst pair here
+  // is 5.72:1.
+  "#2f57c4,#24449e", // indigo
+  "#1c6f52,#155741", // pine
+  "#4a5570,#363f56", // slate
+  "#6b4f96,#523a76", // plum
+  "#2b6b80,#1f5162", // steel
+  "#8a5a2e,#6b4522", // clay
+  "#3a6076,#2b4859", // dusty blue
+  "#546b34,#3f5226", // olive
 ];
 
 export const hueFor = (key: string) =>
@@ -109,7 +115,7 @@ export function MatchOverlay({
           className="confetti"
           style={{
             left: `${(i * 37) % 100}%`,
-            background: ["#ff4d6d", "#ffc65b", "#22d39a", "#5b8cff", "#ff8a5b"][i % 5],
+            background: ["#c4566a", "#c9973f", "#3f9b76", "#5b84e8", "#b9703f"][i % 5],
             animationDuration: `${1.1 + ((i * 7) % 11) / 10}s`,
             animationDelay: `${((i * 13) % 35) / 100}s`,
           }}

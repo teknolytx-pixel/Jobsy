@@ -111,7 +111,7 @@ export default function NotificationSettings({ role }: { role: string }) {
                   alignItems: "flex-start",
                   gap: 12,
                   padding: "14px 0",
-                  borderBottom: "1px solid var(--line, #e6e8f0)",
+                  borderBottom: "1px solid var(--line)",
                   cursor: prefs.unsubscribedAll ? "not-allowed" : "pointer",
                   opacity: prefs.unsubscribedAll ? 0.45 : 1,
                 }}
@@ -135,7 +135,7 @@ export default function NotificationSettings({ role }: { role: string }) {
               style={{
                 marginTop: 26,
                 padding: "14px 16px",
-                border: "1px solid var(--line, #e6e8f0)",
+                border: "1px solid var(--line)",
                 borderRadius: 12,
               }}
             >
