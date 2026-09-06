@@ -3,6 +3,7 @@ import { authErrorResponse, requirePlatformAdmin } from "@/lib/auth";
 import { errorResponse } from "@/lib/apiError";
 import { syncAllSources } from "@/lib/sources";
 import { syncFollowedEmployers } from "@/lib/followedEmployers";
+import { consume, tooMany } from "@/lib/ratelimit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -28,7 +29,27 @@ const BUDGET_MS = 50_000;
 
 export async function POST() {
   try {
-    await requirePlatformAdmin();
+    const admin = await requirePlatformAdmin();
+
+    /**
+     * SEC-002 — `LIMITS.sourceSync` was declared and never consumed.
+     *
+     * This is the one endpoint in the application that makes the server issue
+     * a large volume of outbound HTTP requests to addresses supplied by
+     * configuration. `safeFetch` decides WHERE those requests may go; nothing
+     * decided HOW OFTEN, so an admin session — or anything that had taken
+     * one over — could hold the deployment's whole egress capacity open in a
+     * loop and use Jobsy as the traffic source. One run per ten minutes is
+     * more than the nightly cron needs and far less than a loop wants.
+     */
+    const rl = await consume("sourceSync", admin.id);
+    if (!rl.ok) {
+      return tooMany(
+        rl,
+        "A full sync was started recently. Give it a few minutes before running another — they overlap otherwise."
+      );
+    }
+
     const started = Date.now();
     const deadline = started + BUDGET_MS;
 

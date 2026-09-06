@@ -3,6 +3,7 @@ import { z } from "zod";
 import { AuthError, authErrorResponse, requireRole } from "@/lib/auth";
 import { candidateSwipe, recruiterSwipe } from "@/lib/swipe";
 import { REJECTION_REASONS } from "@/lib/rejectionReasons";
+import { consume, tooMany } from "@/lib/ratelimit";
 
 const Body = z.object({
   mode: z.enum(["candidate", "recruiter"]),
@@ -26,6 +27,34 @@ export async function POST(req: Request) {
     // check a recruiter could POST mode:"candidate" and auto-create job
     // applications in their own name.
     const user = await requireRole(mode === "recruiter" ? "RECRUITER" : "CANDIDATE");
+
+    /**
+     * SEC-002 — the daily swipe ceiling, actually enforced.
+     *
+     * `LIMITS.swipeDaily` and `LIMITS.recruiterSwipeDaily` were declared when
+     * the limiter was written and never once consumed, which is the most
+     * dangerous shape a security control can take: it reads as present in the
+     * config, appears in review, and enforces nothing.
+     *
+     * What it is protecting is not abuse-of-service, it is bulk disclosure. A
+     * recruiter session that can swipe without bound can walk the entire
+     * candidate deck at request speed and keep a copy of every profile it is
+     * shown. The deck is the most sensitive read surface in the product; a
+     * per-day ceiling is what makes "a recruiter browsing candidates" different
+     * from "a recruiter exporting the candidate database".
+     *
+     * Counted BEFORE the swipe is recorded, so the limit bounds attempts rather
+     * than successes — otherwise a rejected swipe is a free probe.
+     */
+    const rl = await consume(mode === "recruiter" ? "recruiterSwipeDaily" : "swipeDaily", user.id);
+    if (!rl.ok) {
+      return tooMany(
+        rl,
+        mode === "recruiter"
+          ? "You've reached today's limit for reviewing candidates. It resets in the morning."
+          : "You've reached today's limit. Come back tomorrow for a fresh deck."
+      );
+    }
 
     if (mode === "recruiter") {
       if (!candidateId) return NextResponse.json({ error: "candidateId required" }, { status: 400 });

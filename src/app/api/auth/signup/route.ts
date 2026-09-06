@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { passwordField } from "@/lib/password";
 import { eq } from "drizzle-orm";
 import { db, users, termsAcceptances, notificationPrefs, companies, companyMembers } from "@/db";
 import { createSession, hashPassword, setSessionCookie } from "@/lib/auth";
@@ -14,7 +15,7 @@ import { deliverAedtNotice } from "@/lib/compliance/aedt";
 
 const Body = z.object({
   email: z.string().email(),
-  password: z.string().min(8, "Password must be at least 8 characters"),
+  password: passwordField(),
   /**
    * Asked as two fields, stored as three.
    *

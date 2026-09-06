@@ -43,7 +43,7 @@ These were pasted into a chat transcript and must be treated as public.
 
 | Secret | Action |
 |---|---|
-| Neon database password (`npg_tc1u4LeafDdX`) | Rotate in the Neon console → update `DATABASE_URL` in Vercel **and** local `.env` |
+| Neon database password (the `npg_…` value in `DATABASE_URL`) | Rotate in the Neon console → update `DATABASE_URL` in Vercel **and** local `.env` |
 | `AUTH_SECRET` | Generate a new one: `openssl rand -base64 32`. **This signs out every user**, which is the desired effect |
 | `CRON_SECRET` | Generate a new one and update the Vercel env var |
 

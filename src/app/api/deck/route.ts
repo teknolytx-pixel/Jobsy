@@ -1,12 +1,26 @@
 import { NextResponse } from "next/server";
 import { AuthError, authErrorResponse, requireRole, requireUser } from "@/lib/auth";
 import { candidateDeck, recruiterDeck } from "@/lib/deck";
+import { consume, tooMany } from "@/lib/ratelimit";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   try {
     const user = await requireUser();
+
+    /**
+     * SEC-002 — `LIMITS.search` was declared and never consumed.
+     *
+     * The deck is a read endpoint, so it is easy to think of throttling it as
+     * politeness. It is not: this is the endpoint that returns candidate
+     * profiles, and an unbounded one is a scraping interface with a login on
+     * the front of it. Sixty a minute is far above what any human moves
+     * through and far below what a script wants.
+     */
+    const rl = await consume("search", user.id);
+    if (!rl.ok) return tooMany(rl, "You're moving faster than we can keep up. Try again in a moment.");
+
     const url = new URL(req.url);
     const mode = url.searchParams.get("mode") ?? "candidate";
 

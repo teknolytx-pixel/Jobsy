@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { eq, or, sql } from "drizzle-orm";
 import { db, users, type User } from "@/db";
 import { env } from "./env";
+import { MAX_PASSWORD_BYTES, PasswordTooLongError, passwordLengthOk } from "./password";
 
 const COOKIE = "jobsy_session";
 const MAX_AGE = 60 * 60 * 24 * 30; // 30 days
@@ -196,8 +197,30 @@ export function authErrorResponse(e: unknown): Response | null {
   return null;
 }
 
-export const hashPassword = (pw: string) => bcrypt.hash(pw, 10);
-export const verifyPassword = (pw: string, hash: string) => bcrypt.compare(pw, hash);
+/**
+ * SEC-003 — bcrypt work factor.
+ *
+ * Was 10. OWASP's current password-storage guidance puts bcrypt's minimum at
+ * 10 and hardware has moved since that floor was set; 12 is roughly 4× the
+ * work per guess, which is the difference that matters to someone running a
+ * stolen hash table through a GPU rig, and about 250ms on a Vercel function —
+ * paid once at login, never on a page render.
+ *
+ * Existing hashes carry their own cost parameter in the string, so raising
+ * this does not invalidate anyone: `bcrypt.compare` keeps verifying cost-10
+ * hashes correctly, and any password set or reset from now on is stored at 12.
+ */
+const BCRYPT_COST = 12;
+
+export { MAX_PASSWORD_BYTES, passwordLengthOk, PasswordTooLongError };
+
+export const hashPassword = (pw: string) => {
+  if (!passwordLengthOk(pw)) throw new PasswordTooLongError();
+  return bcrypt.hash(pw, BCRYPT_COST);
+};
+
+export const verifyPassword = (pw: string, hash: string) =>
+  passwordLengthOk(pw) ? bcrypt.compare(pw, hash) : Promise.resolve(false);
 
 // ─────────────────────────────────────────────────────────────
 // LinkedIn — "Sign In with LinkedIn using OpenID Connect"

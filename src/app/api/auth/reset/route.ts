@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { passwordField } from "@/lib/password";
 import { eq } from "drizzle-orm";
 import { db, users } from "@/db";
 import { env } from "@/lib/env";
@@ -24,7 +25,7 @@ import { audit } from "@/lib/audit";
 const RequestBody = z.object({ email: z.string().email() });
 const ConfirmBody = z.object({
   token: z.string().min(1),
-  password: z.string().min(8, "Password must be at least 8 characters"),
+  password: passwordField(),
 });
 
 const IDENTICAL_RESPONSE = {
