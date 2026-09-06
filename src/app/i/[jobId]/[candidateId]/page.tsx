@@ -89,10 +89,7 @@ export default async function InterestResponse({
           fontSize: 30,
           margin: 0,
           letterSpacing: "-1px",
-          background: "linear-gradient(100deg,#fff,#ffb3c1)",
-          WebkitBackgroundClip: "text",
-          backgroundClip: "text",
-          color: "transparent",
+          color: "var(--txt)",
         }}
       >
         It&rsquo;s a match!

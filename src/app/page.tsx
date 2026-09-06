@@ -1,3 +1,4 @@
+import ThemeToggle from "@/components/ThemeToggle";
 import { redirect } from "next/navigation";
 import { currentUser } from "@/lib/auth";
 import { env } from "@/lib/env";
@@ -133,6 +134,11 @@ export default async function Home() {
           <a href="/legal/terms">Terms</a>
           <span aria-hidden="true">·</span>
           <a href="/legal/privacy">Privacy</a>
+          <span aria-hidden="true">·</span>
+          {/* Reachable before sign-in on purpose. Someone who needs a light or
+              dark surface needs it on the page where they read the pitch, not
+              only after they have an account. */}
+          <ThemeToggle />
         </footer>
       </div>
     </div>

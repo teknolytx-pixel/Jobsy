@@ -1,5 +1,6 @@
 "use client";
 
+import ThemeToggle from "@/components/ThemeToggle";
 import { useState } from "react";
 // Country list only — the centroid table stays server-side.
 import { COUNTRIES, REGIONS } from "@/lib/geo/countries";
@@ -156,8 +157,9 @@ export default function ProfileEditor({
         <a className="iconbtn" href="/swipe">
           <Icon name="external" size={15} label="Back" style={{ transform: "scaleX(-1)" }} />
         </a>
-        <div style={{ fontWeight: 800, fontSize: 17, letterSpacing: "-.3px" }}>Your profile</div>
+        <div style={{ fontWeight: 700, fontSize: 17, letterSpacing: "-.3px" }}>Your profile</div>
         <div className="spacer" />
+        <ThemeToggle />
         <button className="iconbtn" onClick={logout} title="Sign out">
           <Icon name="power" size={15} label="Sign out" />
         </button>
@@ -412,7 +414,15 @@ export default function ProfileEditor({
                 value={availNumber}
                 onChange={(e) => setAvailNumber(e.target.value.replace(/[^0-9]/g, ""))}
               />
-              <select value={availUnit} onChange={(e) => setAvailUnit(e.target.value)}>
+              <select
+                /* The visible "AVAILABLE IN" label belongs to the number field
+                   next to this one, so a screen reader reached this dropdown
+                   and announced an unnamed combo box. Caught by axe
+                   (select-name, critical). */
+                aria-label="Availability unit"
+                value={availUnit}
+                onChange={(e) => setAvailUnit(e.target.value)}
+              >
                 <option value="days">days</option>
                 <option value="weeks">weeks</option>
                 <option value="months">months</option>

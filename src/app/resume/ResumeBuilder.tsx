@@ -145,8 +145,12 @@ export default function ResumeBuilder() {
 
         {/* Tailoring target. Empty option is the plain document. */}
         <div className="ctxbar">
-          <span className="lbl">Tailor to</span>
+          <span className="lbl" id="tailor-to-label">Tailor to</span>
           <select
+            /* `.lbl` is a styled span, not a <label>, so it labelled nothing.
+               aria-labelledby points at it rather than duplicating the words —
+               if the visible text changes, the announced name follows. */
+            aria-labelledby="tailor-to-label"
             value={jobId}
             onChange={(e) => {
               setJobId(e.target.value);
@@ -172,7 +176,7 @@ export default function ResumeBuilder() {
                 <b>Your profile is missing {data.resume.missing.join(", ")}.</b>
                 <br />
                 The resume builds without them — it just has less to work with.{" "}
-                <a href="/profile" style={{ color: "var(--blue)" }}>
+                <a href="/profile" style={{ color: "var(--blue)", textDecoration: "underline" }}>
                   Fill them in
                 </a>{" "}
                 and everything here improves, including your matches.
@@ -201,7 +205,7 @@ export default function ResumeBuilder() {
                   {s.empty ? (
                     <p style={{ color: "var(--dim2)", fontSize: 12.5, margin: 0 }}>{s.hint}</p>
                   ) : (
-                    <ul style={{ margin: 0, paddingLeft: 18, color: "#ced5e4", fontSize: 13.5, lineHeight: 1.6 }}>
+                    <ul style={{ margin: 0, paddingLeft: 18, color: "var(--txt)", fontSize: 13, lineHeight: 1.6 }}>
                       {s.lines.map((l, i) => {
                         // Whether a line is a role heading comes from the
                         // builder. Guessing it here with a regex made a summary

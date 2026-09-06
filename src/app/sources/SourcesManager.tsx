@@ -380,7 +380,7 @@ export default function SourcesManager({ initial }: { initial: Source[] }) {
                   </button>
                   <button
                     className="btn ghost"
-                    style={{ margin: 0, padding: "9px 10px", fontSize: 12.5, color: "#ffb3c1" }}
+                    style={{ margin: 0, padding: "9px 10px", fontSize: 13, color: "var(--no)" }}
                     onClick={() => remove(s)}
                   >
                     Disconnect

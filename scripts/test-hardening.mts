@@ -298,15 +298,37 @@ await t("TC-SEC-005-04", "no route sets a permissive CORS header", () => {
   );
 });
 
-await t("TC-SEC-005-05", "the only dangerouslySetInnerHTML goes through safeJsonLd", () => {
+/**
+ * Every `dangerouslySetInnerHTML` must be either escaped through safeJsonLd /
+ * escapeXml, or an ALL-CAPS module constant — a literal written in the file
+ * itself, with no interpolation and nothing user-supplied reaching it.
+ *
+ * The constant carve-out exists for exactly one case: the anti-flash theme
+ * script in layout.tsx, which has to run synchronously in <head> before first
+ * paint and therefore cannot be a React effect or an external file. Naming the
+ * shape (SCREAMING_CASE identifier, no template literal) keeps the exemption
+ * narrow — a variable holding a request value cannot accidentally qualify.
+ */
+await t("TC-SEC-005-05", "every dangerouslySetInnerHTML is escaped or a vetted constant", () => {
   const uses = srcFiles.filter((f) => read(f).includes("dangerouslySetInnerHTML"));
   for (const f of uses) {
     const s = read(f);
     for (const m of s.matchAll(/dangerouslySetInnerHTML=\{\{\s*__html:\s*([^}]+)\}\}/g)) {
+      const expr = m[1]!.trim();
+      const escaped = /safeJsonLd|escapeXml/.test(expr);
+      const vettedConstant = /^[A-Z][A-Z0-9_]*$/.test(expr);
       assert.ok(
-        /safeJsonLd|escapeXml/.test(m[1]!),
-        `${f} injects raw HTML (${m[1]!.trim()}) without going through safeJsonLd`
+        escaped || vettedConstant,
+        `${f} injects raw HTML (${expr}) without escaping it or using a vetted constant`
       );
+      if (vettedConstant) {
+        const decl = new RegExp(`const\\s+${expr}\\s*=\\s*\`([^\`]*)\``).exec(s);
+        assert.ok(decl, `${f}: ${expr} is not a plain template literal in this file`);
+        assert.ok(
+          !decl![1]!.includes("${"),
+          `${f}: ${expr} interpolates a value — that is not a constant, it is injection`
+        );
+      }
     }
   }
 });

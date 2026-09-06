@@ -385,7 +385,7 @@ export default function JobComposer({
           htmlFor="local-only"
           style={{
             display: "flex", alignItems: "flex-start", gap: 10, margin: "4px 0 10px",
-            padding: "12px 14px", border: "1px solid var(--line, #e6e8f0)", borderRadius: 12,
+            padding: "12px 14px", border: "1px solid var(--line)", borderRadius: 12,
             cursor: "pointer", color: "var(--txt)", fontSize: 13.5, lineHeight: 1.5,
           }}
         >
@@ -486,7 +486,7 @@ export default function JobComposer({
             gap: 10,
             margin: "4px 0 14px",
             padding: "12px 14px",
-            border: "1px solid var(--line, #e6e8f0)",
+            border: "1px solid var(--line)",
             borderRadius: 12,
             cursor: "pointer",
             color: "var(--txt)",

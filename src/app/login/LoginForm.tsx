@@ -266,7 +266,7 @@ export default function LoginForm({
                       border:
                         role === value
                           ? "1px solid transparent"
-                          : "1px solid var(--line, #e6e8f0)",
+                          : "1px solid var(--line)",
                     }}
                   >
                     <span style={{ display: "flex", justifyContent: "center", marginBottom: 6 }}>
@@ -365,7 +365,7 @@ export default function LoginForm({
                       style={{
                         marginTop: 0,
                         background: sponsorship === value ? "var(--brand)" : undefined,
-                        color: sponsorship === value ? "#fff" : undefined,
+                        color: sponsorship === value ? "var(--on-brand)" : undefined,
                       }}
                       aria-pressed={sponsorship === value}
                       onClick={() => setSponsorship(value as boolean)}
@@ -423,7 +423,7 @@ export default function LoginForm({
                       style={{
                         marginTop: 0,
                         background: companyAdmin === value ? "var(--brand)" : undefined,
-                        color: companyAdmin === value ? "#fff" : undefined,
+                        color: companyAdmin === value ? "var(--on-brand)" : undefined,
                       }}
                       aria-pressed={companyAdmin === value}
                       onClick={() => setCompanyAdmin(value as boolean)}
@@ -440,7 +440,7 @@ export default function LoginForm({
           ) : null}
 
           {!signup ? (
-            <p style={{ margin: "-4px 0 12px", fontSize: 13 }}>
+            <p style={{ margin: "8px 0 4px", fontSize: 13 }}>
               <a href="/reset" style={{ color: "var(--dim)", textDecoration: "underline" }}>
                 Forgot your password?
               </a>
@@ -457,7 +457,7 @@ export default function LoginForm({
                 gap: 10,
                 margin: "4px 0 14px",
                 padding: "12px 14px",
-                border: "1px solid var(--line, #e6e8f0)",
+                border: "1px solid var(--line)",
                 borderRadius: 12,
                 cursor: "pointer",
                 // Full contrast. The cases above turned on exactly this.
@@ -481,7 +481,7 @@ export default function LoginForm({
                   href={TERMS_HREF}
                   target="_blank"
                   rel="noopener noreferrer"
-                  style={{ color: "var(--brand, #ff4d6d)", textDecoration: "underline" }}
+                  style={{ color: "var(--brand)", textDecoration: "underline" }}
                 >
                   Terms of Service
                 </a>{" "}
@@ -491,7 +491,7 @@ export default function LoginForm({
                   href={PRIVACY_HREF}
                   target="_blank"
                   rel="noopener noreferrer"
-                  style={{ color: "var(--brand, #ff4d6d)", textDecoration: "underline" }}
+                  style={{ color: "var(--brand)", textDecoration: "underline" }}
                 >
                   Privacy Policy
                 </a>
