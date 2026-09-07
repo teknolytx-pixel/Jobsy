@@ -215,6 +215,27 @@ await t("TC-SEC-003-07", "no composition rules are imposed", () => {
   assert.equal(ok.ok, true, "a long all-lowercase passphrase must be accepted (NIST SP 800-63B)");
 });
 
+/**
+ * The bug this catches, found by screenshotting every screen for the functional
+ * spec: the minimum went from 8 to 10 in v2.51 and both screens still told the
+ * user "At least 8 characters." Nothing failed — the server refused a 9-character
+ * password the UI had just promised was fine, which is the worst kind of wrong,
+ * because the person doing as they were told gets the error.
+ */
+await t("TC-SEC-003-09", "screens state the password minimum by reading it, not repeating it", () => {
+  for (const p of ["src/app/login/LoginForm.tsx", "src/app/reset/ResetForm.tsx"]) {
+    const s = read(p);
+    assert.ok(
+      !/[Aa]t least \d+ characters/.test(s),
+      `${p} hardcodes the password minimum in its copy — it will drift from the policy`
+    );
+    assert.ok(
+      s.includes("MIN_PASSWORD_LENGTH"),
+      `${p} does not read MIN_PASSWORD_LENGTH`
+    );
+  }
+});
+
 await t("TC-SEC-003-08", "signup and reset share one policy", () => {
   for (const p of ["src/app/api/auth/signup/route.ts", "src/app/api/auth/reset/route.ts"]) {
     const s = read(p);

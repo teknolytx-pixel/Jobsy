@@ -1,5 +1,6 @@
 "use client";
 
+import { MIN_PASSWORD_LENGTH } from "@/lib/password";
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Icon, Logo } from "@/components/Icon";
@@ -318,7 +319,9 @@ export default function LoginForm({
               autoComplete={signup ? "new-password" : "current-password"}
             />
             {signup ? (
-              <small style={{ color: "var(--dim)", fontSize: 12 }}>At least 8 characters.</small>
+              <small style={{ color: "var(--dim)", fontSize: 12 }}>
+                At least {MIN_PASSWORD_LENGTH} characters. A few ordinary words in a row beats a short scramble.
+              </small>
             ) : null}
           </label>
 

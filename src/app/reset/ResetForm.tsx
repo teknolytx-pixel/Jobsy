@@ -1,5 +1,6 @@
 "use client";
 
+import { MIN_PASSWORD_LENGTH } from "@/lib/password";
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Logo } from "@/components/Icon";
@@ -101,7 +102,9 @@ export default function ResetForm() {
                 minLength={8}
                 autoComplete="new-password"
               />
-              <small style={{ color: "var(--dim)", fontSize: 12 }}>At least 8 characters.</small>
+              <small style={{ color: "var(--dim)", fontSize: 12 }}>
+                At least {MIN_PASSWORD_LENGTH} characters. A few ordinary words in a row beats a short scramble.
+              </small>
             </label>
           ) : (
             <label className="field">
