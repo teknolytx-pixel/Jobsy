@@ -21,3 +21,6 @@ _to_delete/
 # `tsc` run, so tracking it makes the working tree dirty after any typecheck
 # and produces merge conflicts that mean nothing.
 tsconfig.tsbuildinfo
+
+# Scratch directories used when the mounted working copy refuses unlink.
+_to_delete*/
